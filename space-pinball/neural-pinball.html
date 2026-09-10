@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TENSOR DRIFT — Neural Pinball · Netron view</title>
+<style>
+  /* ------------------------------------------------------------------
+     Palette is Netron 9.2.6's own dark theme, taken from its grapher.css
+     and index.html:
+       graph canvas   #404040        node body      #2d2d2d
+       node border    #242424        node text      #dfdfdf
+       edges          #888888        edge label     #b2b2b2
+       chrome         #1e1e1e        chrome text    #888888
+       selection      rgba(192,0,0,.8)
+     ------------------------------------------------------------------ */
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#1e1e1e;overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe WPC","Segoe UI",Ubuntu,"Droid Sans",sans-serif;
+    font-size:12px;color:#dfdfdf;-webkit-user-select:none;user-select:none;
+    text-rendering:geometricPrecision}
+
+  #app{position:absolute;inset:0;display:grid;
+    grid-template-rows:44px 1fr 46px;
+    grid-template-columns:228px 1fr 286px;
+    grid-template-areas:"top top top" "rail board insp" "bot bot bot"}
+
+  /* ---------- toolbar ---------- */
+  #top{grid-area:top;display:flex;align-items:center;gap:12px;padding:0 12px;
+    background:#1e1e1e;border-bottom:1px solid #333}
+  #brand{font-size:13px;font-weight:700;letter-spacing:1px;color:#dfdfdf;white-space:nowrap}
+  #brand small{display:block;font-size:8.5px;letter-spacing:2px;color:#777;font-weight:400}
+  .seg{display:flex;border:1px solid #555;border-radius:6px;overflow:hidden}
+  .seg button{font:inherit;font-size:11px;padding:5px 12px;border:0;cursor:pointer;
+    color:#bbb;background:#2d2d2d}
+  .seg button+button{border-left:1px solid #555}
+  .seg button.on{color:#fff;background:#557;background:#3a5a8c}
+  .seg button:hover:not(.on){background:#3a3a3a;color:#fff}
+  #stats{margin-left:auto;display:flex;gap:18px;align-items:center}
+  .cell{text-align:right;line-height:1.2}
+  .cell .k{font-size:8.5px;letter-spacing:1.5px;color:#777}
+  .cell .v{font-size:13px;font-weight:600;color:#dfdfdf;font-variant-numeric:tabular-nums}
+
+  /* ---------- left rail ---------- */
+  #rail{grid-area:rail;overflow-y:auto;overflow-x:hidden;background:#252525;
+    border-right:1px solid #333}
+  #rail h4{font-size:8.5px;letter-spacing:1.5px;color:#777;padding:8px 11px 5px;
+    position:sticky;top:0;background:#252525;z-index:2;font-weight:600}
+  .chip{display:flex;align-items:center;gap:7px;padding:3px 9px;cursor:pointer;
+    border-left:3px solid transparent;font-size:10.5px;color:#8a8a8a;line-height:1.3}
+  .chip .sw{width:9px;height:9px;border-radius:2px;flex:0 0 9px;border:1px solid #1a1a1a}
+  .chip .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip .ix{font-size:8px;color:#5a5a5a;min-width:15px;text-align:right}
+  .chip.past{color:#c8c8c8}
+  .chip.act{color:#fff;background:#3a5a8c;border-left-color:#7fb0ff}
+  .chip.sel{background:#4a2222;border-left-color:#c04040}
+  .chip:hover{background:#303030;color:#fff}
+
+  /* ---------- graph surface ---------- */
+  #board{grid-area:board;position:relative;overflow:hidden;background:#404040}
+  #cv{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+  #cv.drag{cursor:grabbing}
+  #ticker{position:absolute;left:0;right:0;top:10px;text-align:center;font-size:11px;
+    font-weight:600;letter-spacing:1px;color:#fff;pointer-events:none;opacity:0;
+    transition:opacity .15s;text-shadow:0 1px 4px #000,0 0 10px #000}
+  #ticker.on{opacity:1}
+  #big{position:absolute;left:0;right:0;top:42%;text-align:center;font-size:26px;
+    font-weight:700;letter-spacing:3px;color:#fff;opacity:0;pointer-events:none;
+    text-shadow:0 2px 12px #000}
+  #big.pop{animation:pop .9s ease-out}
+  @keyframes pop{0%{opacity:0;transform:scale(.7)}18%{opacity:1;transform:scale(1.1)}
+    70%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.04)}}
+  #zoomhud{position:absolute;right:9px;bottom:9px;display:flex;gap:5px}
+  #zoomhud button{width:27px;height:27px;border-radius:5px;font:inherit;font-size:13px;
+    cursor:pointer;color:#ccc;background:#2d2d2dee;border:1px solid #555}
+  #zoomhud button:hover{background:#3a3a3a;color:#fff}
+  #legend{position:absolute;left:9px;bottom:9px;font-size:9.5px;color:#9a9a9a;
+    pointer-events:none;line-height:1.65;text-shadow:0 1px 3px #000}
+  #legend b{color:#d0d0d0;font-weight:600}
+
+  /* ---------- inspector (Netron sidebar) ---------- */
+  #insp{grid-area:insp;overflow-y:auto;background:#252525;border-left:1px solid #333;
+    padding:0 0 20px}
+  #insp .ihead{padding:10px 12px 9px;border-bottom:1px solid #333;background:#2d2d2d}
+  #insp h3{font-size:12.5px;font-weight:600;color:#fff;word-break:break-all;line-height:1.35}
+  #insp .op{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;
+    border-radius:3px;margin-top:6px;color:#fff}
+  #insp section{padding:9px 12px 4px}
+  #insp h5{font-size:8.5px;letter-spacing:1.5px;color:#777;font-weight:600;
+    border-bottom:1px solid #333;padding-bottom:4px;margin-bottom:6px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:10.5px;line-height:1.5}
+  .kv b{color:#8a8a8a;font-weight:400;white-space:nowrap}
+  .kv span{color:#dfdfdf;text-align:right;font-variant-numeric:tabular-nums;word-break:break-all}
+  .kv span.t{color:#9fc4f0}
+  ol.ops{list-style:none;counter-reset:o;font-size:10.5px;line-height:1.6}
+  ol.ops li{counter-increment:o;padding-left:19px;position:relative;color:#c4c4c4;margin-bottom:2px}
+  ol.ops li:before{content:counter(o);position:absolute;left:0;top:1px;width:13px;
+    text-align:center;font-size:8px;color:#777;border:1px solid #444;border-radius:2px}
+  #insp .note{font-size:10px;color:#8a8a8a;line-height:1.65;margin:2px 12px 0;
+    border-top:1px solid #333;padding-top:8px}
+
+  /* ---------- transport ---------- */
+  #bot{grid-area:bot;display:flex;align-items:center;gap:9px;padding:0 12px;
+    background:#1e1e1e;border-top:1px solid #333}
+  .tbtn{font:inherit;font-size:11px;padding:6px 13px;border-radius:5px;cursor:pointer;
+    color:#ccc;background:#2d2d2d;border:1px solid #555}
+  .tbtn:hover{background:#3a3a3a;color:#fff}
+  .tbtn.hot{color:#fff;background:#3a5a8c;border-color:#4a6fa8}
+  #prog{flex:1;height:5px;border-radius:3px;background:#2d2d2d;position:relative;
+    overflow:hidden;border:1px solid #444}
+  #progfill{position:absolute;left:0;top:0;bottom:0;width:0%;
+    background:#7fb0ff;transition:width .1s linear}
+  #ptxt{font-size:10px;color:#9a9a9a;min-width:150px;text-align:right;
+    font-variant-numeric:tabular-nums}
+
+  /* ---------- start card: compact, never hides the graph ---------- */
+  #ov{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;
+    width:412px;padding:20px 24px;border-radius:8px;text-align:center;
+    background:#252525f2;border:1px solid #555;box-shadow:0 10px 40px #000a}
+  #ov.hide{display:none}
+  #ovt{font-size:22px;font-weight:700;letter-spacing:3px;color:#fff}
+  #ovs{font-size:10px;letter-spacing:2.5px;color:#888;margin-top:3px}
+  #ovd{font-size:11px;color:#b0b0b0;line-height:1.75;margin-top:12px}
+  #ovd em{color:#9fc4f0;font-style:normal}
+  #go{margin-top:15px;padding:9px 26px;border:1px solid #4a6fa8;border-radius:5px;
+    font:inherit;font-size:12px;font-weight:600;cursor:pointer;color:#fff;background:#3a5a8c}
+  #go:hover{background:#4a6fa8}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:#252525}
+  ::-webkit-scrollbar-thumb{background:#4a4a4a;border-radius:5px;border:2px solid #252525}
+  ::-webkit-scrollbar-thumb:hover{background:#5f5f5f}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="top">
+    <div id="brand">TENSOR DRIFT<small>NEURAL PINBALL · NETRON VIEW</small></div>
+    <div class="seg" id="modelSeg">
+      <button data-m="A" class="on">Model A</button>
+      <button data-m="B">Model B</button>
+      <button data-m="AB">Compare</button>
+    </div>
+    <div class="seg" id="viewSeg">
+      <button data-v="flow" class="on">Data flow</button>
+      <button data-v="arch">Architecture</button>
+    </div>
+    <div id="stats">
+      <div class="cell"><div class="k">MODEL</div><div class="v" id="sModel">—</div></div>
+      <div class="cell"><div class="k">NODE</div><div class="v" id="sLayer">0 / 0</div></div>
+      <div class="cell"><div class="k">PARAMS</div><div class="v" id="sParams">—</div></div>
+      <div class="cell"><div class="k">ACTIVATIONS</div><div class="v" id="sHits">0</div></div>
+    </div>
+  </div>
+
+  <div id="rail"><h4>EXECUTION ORDER</h4><div id="chips"></div></div>
+
+  <div id="board">
+    <canvas id="cv"></canvas>
+    <div id="ticker"></div>
+    <div id="big"></div>
+    <div id="legend">
+      <b>Drag</b> pan · <b>Wheel</b> zoom · <b>Click</b> a node to inspect<br>
+      <b>Space</b> play/pause · <b>→</b> step · <b>R</b> restart · <b>F</b> fit
+    </div>
+    <div id="zoomhud">
+      <button id="zIn" title="Zoom in">+</button>
+      <button id="zOut" title="Zoom out">&minus;</button>
+      <button id="zFit" title="Fit graph">⤢</button>
+    </div>
+    <div id="ov">
+      <div id="ovt">TENSOR DRIFT</div>
+      <div id="ovs">DATA FLOW AS A PINBALL MACHINE</div>
+      <div id="ovd">
+        The <em>ball is the activation tensor</em>; the <em>graph is the machine</em>.
+        Each Netron node is a bumper — the tensor slams in, the node fires,
+        the data is transformed and kicked to the next op.<br>
+        <em>LFM2.5-1.2B-Instruct</em> and its drafter <em>-DSpark</em>.
+      </div>
+      <button id="go">Release the tensor</button>
+    </div>
+  </div>
+
+  <div id="insp"></div>
+
+  <div id="bot">
+    <button class="tbtn" id="bRestart" title="Restart (R)">⏮ Restart</button>
+    <button class="tbtn hot" id="bPlay" title="Play / pause (Space)">⏸ Pause</button>
+    <button class="tbtn" id="bStep" title="Step one node (→)">⏭ Step</button>
+    <button class="tbtn" id="bSpeed" title="Cycle speed">1.0×</button>
+    <div id="prog"><div id="progfill"></div></div>
+    <div id="ptxt">idle</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ================================================================
+   NETRON DARK PALETTE  (verbatim from netron/grapher.css + index.html)
+   ================================================================ */
+const NET = {
+  canvas:'#404040', body:'#2d2d2d', border:'#242424', text:'#dfdfdf',
+  edge:'#888888', edgeLabel:'#b2b2b2', select:'rgba(192,0,0,0.8)',
+  ioFill:'#404040', constFill:'#4b4b4b', headerDefault:'#303030'
+};
+/* .node-item-type-<category>, dark theme, 0.7 alpha */
+const CAT = {
+  layer:        'rgba(51,85,136,0.7)',
+  activation:   'rgba(75,27,22,0.7)',
+  pool:         'rgba(51,85,51,0.7)',
+  normalization:'rgba(51,85,68,0.7)',
+  transform:    'rgba(51,85,68,0.7)',
+  tensor:       'rgba(89,66,59,0.7)',
+  data:         'rgba(85,85,85,0.7)',
+  attention:    'rgba(100,50,0,0.7)',
+  custom:       'rgba(64,64,64,0.7)'
+};
+/* bright accents used only by the pinball FX layer (ball, flash, sparks) */
+const FXC = {
+  layer:'#7fb0ff', activation:'#ff8a5c', normalization:'#63d6a4', transform:'#63d6a4',
+  attention:'#ffb04a', data:'#c9c9c9', tensor:'#d0a58e', custom:'#bbbbbb'
+};
+
+const TAU=Math.PI*2;
+const clamp=(v,a,b)=> v<a?a:(v>b?b:v);
+const rnd=(a,b)=> a+Math.random()*(b-a);
+const lerp=(a,b,t)=> a+(b-a)*t;
+const easeOut=t=>1-Math.pow(1-t,3);
+const easeIn =t=>t*t*t;
+function fmtN(n){
+  if(n>=1e9) return (n/1e9).toFixed(2)+' B';
+  if(n>=1e6) return (n/1e6).toFixed(2)+' M';
+  if(n>=1e3) return (n/1e3).toFixed(1)+' K';
+  return String(n);
+}
+const shp = a => a ? a.join('×') : '';
+const ang = a => a ? '<'+a.join('×')+'>' : '';
+
+/* ================================================================
+   AUDIO — the original game's synth, unchanged
+   ================================================================ */
+let actx=null, AUDIO=true;
+function ac(){
+  if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(actx && actx.state==='suspended') actx.resume();
+  return actx;
+}
+function tone(freq,dur,type,vol,slideTo){
+  const a=ac(); if(!a||!AUDIO) return;
+  try{
+    const t=a.currentTime,o=a.createOscillator(),g=a.createGain();
+    o.type=type||'square'; o.frequency.setValueAtTime(freq,t);
+    if(slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(24,slideTo),t+dur);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(vol||0.1,t+0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t+dur+0.03);
+  }catch(e){}
+}
+function thud(dur,vol){
+  const a=ac(); if(!a||!AUDIO) return;
+  try{
+    const t=a.currentTime,n=Math.max(1,Math.floor(a.sampleRate*dur));
+    const buf=a.createBuffer(1,n,a.sampleRate),d=buf.getChannelData(0);
+    for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,2.5);
+    const s=a.createBufferSource(); s.buffer=buf;
+    const f=a.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1500;
+    const g=a.createGain(); g.gain.value=vol||0.14;
+    s.connect(f); f.connect(g); g.connect(a.destination); s.start(t);
+  }catch(e){}
+}
+
+/* ================================================================
+   MODEL GRAPHS — real LFM2.5 checkpoints.
+   `rows` are the node's initializers, shown exactly as Netron shows
+   them: parameter name on the left, <shape> on the right.
+   ================================================================ */
+function mkGraph(){
+  const nodes=[]; let id=0;
+  return { nodes, add(n){
+    n.id=id++; n.act=0; n.ripple=-1; n.visited=false; n.hit=0; n.flip=0;
+    n.ins=n.ins||[]; n.attrs=n.attrs||[]; n.ops=n.ops||[]; n.rows=n.rows||[];
+    nodes.push(n); return n.id; } };
+}
+
+function buildA(){
+  const S=128,H=2048,V=65536,FF=8192,NH=32,NKV=8,HD=64;
+  const g=mkGraph();
+  const T=['conv','conv','full_attention','conv','conv','full_attention','conv','conv',
+           'full_attention','conv','full_attention','conv','full_attention','conv',
+           'full_attention','conv'];
+
+  let p=g.add({name:'input_ids',kind:'input',op:'Input',cat:'data',
+    dtype:'int64',shapeIn:null,shapeOut:[1,S],params:0,lane:0,
+    rows:[['type','int64 <1×'+S+'>']],
+    attrs:[['sequence',S],['vocab',V.toLocaleString()]],
+    ops:['token ids enter the graph'],
+    note:'The plunger. One token id per board position.'});
+
+  p=g.add({name:'model.embed_tokens',kind:'embedding',op:'Gather',cat:'transform',ins:[p],
+    dtype:'float32',shapeIn:[1,S],shapeOut:[1,S,H],params:V*H,lane:0,
+    rows:[['weight','<'+V+'×'+H+'>']],
+    attrs:[['tied','true'],['params',fmtN(V*H)]],
+    ops:['Gather(embed_tokens.weight, input_ids)'],
+    note:'Tied: this same 134 M matrix returns at the end as lm_head.'});
+
+  for(let i=0;i<16;i++){
+    if(T[i]==='conv'){
+      p=g.add({name:'model.layers.'+i+'.conv',kind:'conv',op:'Lfm2ShortConv',cat:'layer',ins:[p],
+        layer:i,dtype:'float32',shapeIn:[1,S,H],shapeOut:[1,S,H],
+        params:6144*H+H*3+H*H+H,lane:0,
+        rows:[['operator_norm','<'+H+'>'],['in_proj','<6144×'+H+'>'],
+              ['conv','<'+H+'×1×3>'],['out_proj','<'+H+'×'+H+'>']],
+        attrs:[['kernel',3],['groups',H],['causal','true'],['gating','double']],
+        ops:['operator_norm  RMSNorm('+H+', eps=1e-5)',
+             'in_proj  Linear '+H+' → 6144',
+             'chunk → B, C, x',
+             'Mul  input gate  B * x',
+             'Conv1d  depthwise, groups='+H+', k=3',
+             'Mul  output gate  C * conv',
+             'out_proj  Linear '+H+' → '+H,
+             'Add  residual'],
+        note:'A gated 3-tap depthwise causal convolution. O(L) sequence mixing — '+
+             'this is why LFM2 is cheap on-device.'});
+    }else{
+      p=g.add({name:'model.layers.'+i+'.self_attn',kind:'attention',op:'GroupQueryAttention',
+        cat:'attention',ins:[p],layer:i,dtype:'float32',shapeIn:[1,S,H],shapeOut:[1,S,H],
+        params:H*H+NKV*HD*H*2+H*H+HD*2+H,lane:0,
+        rows:[['operator_norm','<'+H+'>'],['q_proj','<'+H+'×'+H+'>'],
+              ['k_proj','<'+(NKV*HD)+'×'+H+'>'],['v_proj','<'+(NKV*HD)+'×'+H+'>'],
+              ['out_proj','<'+H+'×'+H+'>'],['q_layernorm','<'+HD+'>'],['k_layernorm','<'+HD+'>']],
+        attrs:[['num_heads',NH],['kv_heads',NKV],['head_dim',HD],
+               ['fan-out',(NH/NKV)+'×'],['rope_theta','1e6'],['rope','NeoX']],
+        ops:['operator_norm  RMSNorm('+H+')',
+             'q/k/v_proj + per-head q/k_layernorm  RMSNorm('+HD+')',
+             'RoPE  theta=1e6, NeoX-style',
+             'softmax(QKᵀ/√'+HD+') · V',
+             'out_proj  Linear '+H+' → '+H,
+             'Add  residual'],
+        note:'32 query heads over 8 KV heads — a 4× fan-out.'});
+    }
+    p=g.add({name:'model.layers.'+i+'.feed_forward',kind:'mlp',op:'SwiGLU',cat:'activation',ins:[p],
+      layer:i,dtype:'float32',shapeIn:[1,S,H],shapeOut:[1,S,H],params:H*FF*3+H,lane:0,
+      rows:[['ffn_norm','<'+H+'>'],['w1','<'+FF+'×'+H+'>'],
+            ['w3','<'+FF+'×'+H+'>'],['w2','<'+H+'×'+FF+'>']],
+      attrs:[['hidden',H],['intermediate',FF],['activation','SiLU'],['gated','true']],
+      ops:['ffn_norm  RMSNorm('+H+')',
+           'w1 / w3  Linear '+H+' → '+FF,
+           'SiLU(w1(x)) * w3(x)',
+           'w2  Linear '+FF+' → '+H,
+           'Add  residual'],
+      note:H+' widens to '+FF+', gets gated, narrows back. config.json says '+
+           'intermediate_size=12288 — the weights say '+FF+'.'});
+  }
+
+  p=g.add({name:'model.embedding_norm',kind:'norm',op:'RMSNorm',cat:'normalization',ins:[p],
+    dtype:'float32',shapeIn:[1,S,H],shapeOut:[1,S,H],params:H,lane:0,
+    rows:[['weight','<'+H+'>']],
+    attrs:[['eps','1e-5']],
+    ops:['x * rsqrt(mean(x²) + eps) * weight'],
+    note:'Final normalisation before the tied head.'});
+
+  p=g.add({name:'lm_head',kind:'linear',op:'MatMul',cat:'layer',ins:[p],
+    dtype:'float32',shapeIn:[1,S,H],shapeOut:[1,S,V],params:0,lane:0,
+    rows:[['weight','tied → embed_tokens']],
+    attrs:[['out_features',V.toLocaleString()],['tied','true']],
+    ops:['MatMul(hidden, embed_tokens.weightᵀ)'],
+    note:'No separate lm_head tensor exists on disk — the embedding is reused.'});
+
+  g.add({name:'logits',kind:'output',op:'Output',cat:'data',ins:[p],
+    dtype:'float32',shapeIn:[1,S,V],shapeOut:[1,S,V],params:0,lane:0,
+    rows:[['type','float32 <1×'+S+'×'+V+'>']],
+    attrs:[['vocab',V.toLocaleString()]],
+    ops:['next-token distribution'],
+    note:'Target reached.'});
+
+  return {key:'A',title:'LFM2.5-1.2B-Instruct',sub:'hybrid · 10 ShortConv + 6 attention',
+          seq:S,nodes:g.nodes,total:1170340608};
+}
+
+function buildB(){
+  const BLK=9,CTX=24,H=2048,V=65536,FF=6144,NH=32,NKV=8,HD=64,RK=256,TAPS=5;
+  const g=mkGraph();
+
+  const th=g.add({name:'target_hidden',kind:'input',op:'Input',cat:'data',
+    dtype:'float32',shapeIn:null,shapeOut:[1,CTX,H*TAPS],params:0,lane:-1,
+    rows:[['type','float32 <1×'+CTX+'×'+(H*TAPS)+'>']],
+    attrs:[['taps','[2, 5, 8, 11, 14]'],['of layers',16]],
+    ops:['5 tapped target layers, concatenated'],
+    note:'The drafter never re-reads the prompt — it inherits the target\'s '+
+         'internal state, sampled every 3 layers.'});
+
+  let c=g.add({name:'fc',kind:'linear',op:'Linear',cat:'layer',ins:[th],
+    dtype:'float32',shapeIn:[1,CTX,H*TAPS],shapeOut:[1,CTX,H],params:H*H*TAPS,lane:-1,
+    rows:[['weight','<'+H+'×'+(H*TAPS)+'>']],
+    attrs:[['in_features',H*TAPS],['out_features',H],['bias','false']],
+    ops:['Linear '+(H*TAPS)+' → '+H],
+    note:'10240 → 2048. The MatMul that tells you this model eats five layers '+
+         'of another model.'});
+
+  c=g.add({name:'hidden_norm',kind:'norm',op:'RMSNorm',cat:'normalization',ins:[c],
+    dtype:'float32',shapeIn:[1,CTX,H],shapeOut:[1,CTX,H],params:H,lane:-1,
+    rows:[['weight','<'+H+'>']],attrs:[['eps','1e-5']],ops:['RMSNorm('+H+')'],
+    note:'The context prefix is written straight into the draft KV cache.'});
+
+  let p=g.add({name:'input_ids',kind:'input',op:'Input',cat:'data',
+    dtype:'int64',shapeIn:null,shapeOut:[1,BLK],params:0,lane:0,
+    rows:[['type','int64 <1×'+BLK+'>']],
+    attrs:[['block_size',BLK],['mask_token_id',64402]],
+    ops:['9 masked positions, proposed at once'],
+    note:'Nine mask tokens — the whole block is drafted in one pass.'});
+
+  p=g.add({name:'embed_tokens',kind:'embedding',op:'Gather',cat:'transform',ins:[p],
+    dtype:'float32',shapeIn:[1,BLK],shapeOut:[1,BLK,H],params:0,lane:0,
+    rows:[['weight','shared <'+V+'×'+H+'>']],
+    attrs:[['weight','injected from target']],
+    ops:['Gather(target.embed_tokens.weight, input_ids)'],
+    note:'Not in this checkpoint — SGLang injects the target\'s tied embedding.'});
+
+  for(let i=0;i<5;i++){
+    p=g.add({name:'layers.'+i+'.self_attn',kind:'attention',op:'Attention',cat:'attention',
+      ins:[p,c],layer:i,dtype:'float32',shapeIn:[1,BLK,H],shapeOut:[1,BLK,H],
+      params:H*H+NKV*HD*H*2+H*H+HD*2+H,lane:0,
+      rows:[['input_layernorm','<'+H+'>'],['q_proj','<'+H+'×'+H+'>'],
+            ['k_proj','<'+(NKV*HD)+'×'+H+'>'],['v_proj','<'+(NKV*HD)+'×'+H+'>'],
+            ['o_proj','<'+H+'×'+H+'>'],['q_norm','<'+HD+'>'],['k_norm','<'+HD+'>']],
+      attrs:[['num_heads',NH],['kv_heads',NKV],['head_dim',HD],
+             ['causal','false'],['rope','GPT-J interleaved'],['ctx prefix',CTX]],
+      ops:['input_layernorm  RMSNorm('+H+')',
+           'q/k/v_proj + per-head q_norm / k_norm  RMSNorm('+HD+')',
+           'RoPE  interleaved (rope_is_neox_style = false)',
+           'concat context K/V prefix ('+CTX+' tokens)',
+           'softmax(QKᵀ/√'+HD+') · V — ENCODER_ONLY, no causal mask',
+           'o_proj  Linear '+H+' → '+H,
+           'Add  residual'],
+      note:'Bidirectional over the block: all 9 positions see each other, plus the '+
+           'whole context prefix. That is what makes it a block decoder.'});
+
+    p=g.add({name:'layers.'+i+'.mlp',kind:'mlp',op:'SwiGLU',cat:'activation',ins:[p],
+      layer:i,dtype:'float32',shapeIn:[1,BLK,H],shapeOut:[1,BLK,H],params:H*FF*3+H,lane:0,
+      rows:[['post_attention_layernorm','<'+H+'>'],['gate_proj','<'+FF+'×'+H+'>'],
+            ['up_proj','<'+FF+'×'+H+'>'],['down_proj','<'+H+'×'+FF+'>']],
+      attrs:[['hidden',H],['intermediate',FF],['activation','SiLU']],
+      ops:['post_attention_layernorm  RMSNorm('+H+')',
+           'gate_proj / up_proj  Linear '+H+' → '+FF,
+           'SiLU(gate) * up',
+           'down_proj  Linear '+FF+' → '+H,'Add  residual'],
+      note:'Narrower than the target\'s MLP — 6144 instead of 8192.'});
+  }
+
+  const hid=g.add({name:'norm',kind:'norm',op:'RMSNorm',cat:'normalization',ins:[p],
+    dtype:'float32',shapeIn:[1,BLK,H],shapeOut:[1,BLK,H],params:H,lane:0,
+    rows:[['weight','<'+H+'>']],attrs:[['eps','1e-5']],ops:['RMSNorm('+H+')'],
+    note:'Feeds the head, the Markov bias and the confidence gauge.'});
+
+  const base=g.add({name:'lm_head',kind:'linear',op:'MatMul',cat:'layer',ins:[hid],
+    dtype:'float32',shapeIn:[1,BLK,H],shapeOut:[1,BLK,V],params:0,lane:0,
+    rows:[['weight','shared <'+V+'×'+H+'>']],
+    attrs:[['weight','injected from target']],
+    ops:['MatMul(hidden, target.lm_head.weightᵀ)'],
+    note:'Base logits come from the target\'s head, not the drafter\'s.'});
+
+  const mk=g.add({name:'prev_token_ids',kind:'input',op:'Input',cat:'data',
+    dtype:'int64',shapeIn:null,shapeOut:[1,BLK],params:0,lane:-1,
+    rows:[['type','int64 <1×'+BLK+'>']],
+    attrs:[['position 0','anchor token']],
+    ops:['previously proposed token per position'],
+    note:'cat([anchor, draft_tokens[:, :gamma-1]]) — confirmed in '+
+         'dspark_planner.build_markov_embed_stack().'});
+
+  const mw1=g.add({name:'markov_head.markov_w1',kind:'markov',op:'Gather',cat:'transform',ins:[mk],
+    dtype:'float32',shapeIn:[1,BLK],shapeOut:[1,BLK,RK],params:V*RK,lane:-1,
+    rows:[['weight','<'+V+'×'+RK+'>']],
+    attrs:[['markov_rank',RK]],
+    ops:['Gather(markov_w1.weight, prev_token_ids)'],
+    note:'Rank-256 factorisation of a 65536×65536 bigram matrix — 33.5 M params '+
+         'instead of 4.3 B.'});
+
+  const mw2=g.add({name:'markov_head.markov_w2',kind:'markov',op:'Linear',cat:'layer',ins:[mw1],
+    dtype:'float32',shapeIn:[1,BLK,RK],shapeOut:[1,BLK,V],params:V*RK,lane:-1,
+    rows:[['weight','<'+V+'×'+RK+'>']],
+    attrs:[['in_features',RK],['out_features',V.toLocaleString()]],
+    ops:['Linear '+RK+' → '+V],
+    note:'Expands the latent back to vocab width as an additive bias.'});
+
+  const add=g.add({name:'logits',kind:'merge',op:'Add',cat:'custom',ins:[base,mw2],
+    dtype:'float32',shapeIn:[1,BLK,V],shapeOut:[1,BLK,V],params:0,lane:0,
+    rows:[['inputs','base_logits, markov_bias']],
+    attrs:[['inputs',2]],ops:['base_logits + markov_bias'],
+    note:'How a block decoder recovers token-to-token dependence inside a block '+
+         'it otherwise predicts in parallel.'});
+
+  g.add({name:'confidence_head.proj',kind:'conf',op:'Linear + Sigmoid',cat:'activation',
+    ins:[hid,mw1],dtype:'float32',shapeIn:[1,BLK,H+RK],shapeOut:[1,BLK],
+    params:(H+RK)+1,lane:-1,
+    rows:[['weight','<1×'+(H+RK)+'>'],['bias','<1>']],
+    attrs:[['in_features',H+RK],['= hidden + rank',H+' + '+RK]],
+    ops:['cat(hidden, markov_w1(prev)) → '+(H+RK),
+         'Linear '+(H+RK)+' → 1','sigmoid(raw / sts_temperature)'],
+    note:'Predicted acceptance probability per position — truncates the block '+
+         'early instead of verifying all 9 tokens.'});
+
+  g.add({name:'output',kind:'output',op:'Output',cat:'data',ins:[add],
+    dtype:'float32',shapeIn:[1,BLK,V],shapeOut:[1,BLK,V],params:0,lane:0,
+    rows:[['type','float32 <1×'+BLK+'×'+V+'>']],
+    attrs:[['block',BLK],['mean accepted','4.81 / 10']],
+    ops:['9 drafted tokens → target verifies'],
+    note:'The target verifies every token, so output is identical to running the '+
+         'target alone — just ~2× faster.'});
+
+  return {key:'B',title:'LFM2.5-1.2B-Instruct-DSpark',
+          sub:'drafter · 5 attention + Markov + confidence',
+          seq:BLK,nodes:g.nodes,total:295725953};
+}
+
+const MODELS={A:buildA(),B:buildB()};
+/* kept for the inspector swatch + rail colour */
+const KIND={};
+for(const k of ['input','embedding','conv','attention','mlp','norm','linear','markov','merge','conf','output'])
+  KIND[k]={c:'#888'};
+
+/* ================================================================
+   NETRON NODE GEOMETRY
+   ================================================================ */
+const HDR_H=23, ROW_H=17, PAD_X=11, GAP=64, LANE=330;
+const measure=document.createElement('canvas').getContext('2d');
+const FONT_HDR='600 12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+const FONT_ROW='11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+
+function layout(model){
+  const n=model.nodes;
+  for(const d of n){
+    measure.font=FONT_HDR;
+    let w=measure.measureText(d.op).width+PAD_X*2+14;
+    measure.font=FONT_ROW;
+    for(const [k,v] of d.rows)
+      w=Math.max(w, measure.measureText(k).width+measure.measureText(v).width+PAD_X*2+22);
+    d.w=Math.max(150,Math.ceil(w));
+    d.h=HDR_H+d.rows.length*ROW_H;
+  }
+  let y=90;
+  for(const d of n){
+    d.y=y+d.h/2; d.x=(d.lane||0)*LANE;
+    y+=d.h+GAP;
+  }
+  let x0=1e9,x1=-1e9,y1=0;
+  for(const d of n){ x0=Math.min(x0,d.x-d.w/2); x1=Math.max(x1,d.x+d.w/2);
+                     y1=Math.max(y1,d.y+d.h/2); }
+  model.bounds={x0:x0-70,x1:x1+70,y0:0,y1:y1+80};
+  model.h=y1;
+}
+layout(MODELS.A); layout(MODELS.B);
+
+const portOut = d => ({x:d.x, y:d.y+d.h/2});
+const portIn  = d => ({x:d.x, y:d.y-d.h/2});
+function edgePath(a,b){
+  const p0=portOut(a), p3=portIn(b);
+  const dy=Math.max(26,(p3.y-p0.y)*0.42);
+  return {p0,p1:{x:p0.x,y:p0.y+dy},p2:{x:p3.x,y:p3.y-dy},p3};
+}
+function bez(e,t){
+  const u=1-t,a=u*u*u,b=3*u*u*t,c=3*u*t*t,d=t*t*t;
+  return {x:a*e.p0.x+b*e.p1.x+c*e.p2.x+d*e.p3.x,
+          y:a*e.p0.y+b*e.p1.y+c*e.p2.y+d*e.p3.y};
+}
+
+/* ================================================================
+   SIM
+   ================================================================ */
+function mkSim(model,ox){
+  return {model,ox:ox||0,i:0,phase:'idle',t:0,hold:0,dur:.55,edge:null,hits:0,
+    ball:{x:0,y:0,px:0,py:0,r:11,hue:'#7fb0ff',glow:0,squash:0,orb:[],density:1,spin:0,trail:[]},
+    done:false};
+}
+function resetSim(s){
+  for(const d of s.model.nodes){ d.act=0; d.visited=false; d.ripple=-1; d.hit=0; d.flip=0; }
+  s.i=0; s.phase='idle'; s.t=0; s.hold=0; s.hits=0; s.done=false;
+  const b=s.ball, n0=s.model.nodes[0];
+  b.x=n0.x+s.ox; b.y=n0.y-70; b.r=11; b.hue='#7fb0ff'; b.glow=0; b.squash=0;
+  b.density=1; b.spin=0; b.trail.length=0; b.orb.length=0;
+  for(let i=0;i<10;i++) b.orb.push({a:rnd(0,TAU),rr:rnd(.5,1),sp:rnd(.6,2.2),sz:rnd(1,2.2)});
+}
+
+const G={mode:'A',view:'flow',speed:1,paused:false,stepOnce:false,sims:[],selected:null,
+  shake:0,flash:0,started:false,
+  cam:{x:0,y:0,z:1,tx:0,ty:0,tz:1},drag:null,T:0};
+const parts=[],flashes=[],sparks=[],pulses=[];
+
+const el=id=>document.getElementById(id);
+const cv=el('cv'), ctx=cv.getContext('2d');
+let VW=800,VH=600,DPR=1;
+function resize(){
+  const r=el('board').getBoundingClientRect();
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  VW=Math.max(120,r.width); VH=Math.max(120,r.height);
+  cv.width=VW*DPR; cv.height=VH*DPR;
+}
+new ResizeObserver(resize).observe(el('board')); resize();
+
+/* ================================================================
+   FX  —  HIT → FLASH → RIPPLE → TRANSFORM → PROPAGATE
+   ================================================================ */
+function burst(x,y,n,color,spd,life){
+  for(let i=0;i<n;i++){
+    if(parts.length>620) break;
+    const a=rnd(0,TAU),s=rnd(.15,1)*(spd||250);
+    parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,
+                max:life||rnd(.3,.75),c:color,sz:rnd(1.2,3.2)});
+  }
+}
+function sparkle(x,y,n,color){
+  for(let i=0;i<n;i++){
+    if(sparks.length>260) break;
+    const a=rnd(0,TAU),s=rnd(260,760);
+    sparks.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,max:rnd(.12,.3),c:color});
+  }
+}
+function flashAt(x,y,r,color){ flashes.push({x,y,r,life:1,max:.32,c:color}); }
+
+function impact(sim,node){
+  const ox=sim.ox, col=FXC[node.cat]||'#c9c9c9', b=sim.ball;
+  const cx=node.x+ox, cy=node.y-node.h/2;
+
+  node.act=1; node.ripple=0; node.visited=true; node.hit=1; node.flip=1;
+  sim.hits++;
+
+  flashAt(cx,cy,node.w*0.55,'#ffffff');
+  flashAt(cx,cy,node.w*1.0,col);
+  burst(cx,cy,30,col,410);
+  burst(cx,cy,12,'#ffffff',600,.28);
+  sparkle(cx,cy,14,col);
+
+  b.glow=1; b.squash=1;
+  G.shake=Math.min(14,G.shake+7.5);
+  G.flash=Math.min(.34,G.flash+.17);
+  transform(b,node);
+
+  const f={input:200,embedding:330,conv:520,attention:640,mlp:420,norm:760,
+           linear:300,markov:480,merge:560,conf:880,output:180}[node.kind]||420;
+  tone(f,.075,node.kind==='norm'?'sine':'square',.085,f*.42);
+  thud(.06,.13);
+
+  say(node.op+'  ·  '+node.name);
+  if(node.kind==='output'){ big('OUTPUT'); G.flash=.5; G.shake=16; }
+  if(!G.selected) renderInspector(node);
+  markRail(sim);
+}
+
+function transform(b,node){
+  b.hue=FXC[node.cat]||'#c9c9c9';
+  switch(node.kind){
+    case 'embedding': b.r=12; b.density=1.6;
+      while(b.orb.length<20) b.orb.push({a:rnd(0,TAU),rr:rnd(.6,1.25),sp:rnd(.5,2),sz:rnd(1,2.4)});
+      break;
+    case 'conv': b.r=10.5; b.density=1.3; b.spin+=1.4;
+      for(const o of b.orb){ o.rr=clamp(o.rr*.78,.28,1.3); o.sp*=1.15; } break;
+    case 'attention': b.r=13; b.density=1.8; b.spin+=3.2;
+      for(let i=0;i<b.orb.length;i++){
+        b.orb[i].a=(i%8)/8*TAU+rnd(-.16,.16); b.orb[i].rr=rnd(.85,1.35);
+      }
+      while(b.orb.length<24) b.orb.push({a:rnd(0,TAU),rr:rnd(.85,1.3),sp:rnd(1,2.6),sz:rnd(1,2.2)});
+      break;
+    case 'mlp': b.density=2.1;
+      while(b.orb.length<28) b.orb.push({a:rnd(0,TAU),rr:rnd(1.1,1.7),sp:rnd(.8,2.4),sz:rnd(1,2.8)});
+      for(let i=b.orb.length-1;i>=0;i--) if(Math.random()<.30) b.orb.splice(i,1); // SiLU gating
+      b.r=11.5; break;
+    case 'norm': b.r=11; b.density=1;
+      for(let i=0;i<b.orb.length;i++){ b.orb[i].a=i/b.orb.length*TAU; b.orb[i].rr=1.02; b.orb[i].sp=1.1; }
+      break;
+    case 'linear': b.r=12; b.density=1.5; b.spin+=.8; break;
+    case 'markov': b.r=10.5; b.density=1.2; break;
+    case 'merge': b.r=13.5; b.density=2.2;
+      while(b.orb.length<26) b.orb.push({a:rnd(0,TAU),rr:rnd(.7,1.4),sp:rnd(.8,2),sz:rnd(1,2.4)});
+      break;
+    case 'conf': b.r=9.5; b.density=.9; break;
+    case 'output': b.r=16; b.density=2.6; break;
+  }
+}
+
+function stepSim(s,dt){
+  if(s.done) return;
+  const N=s.model.nodes,b=s.ball;
+  if(s.phase==='idle'){
+    s.phase='impact'; s.hold=.20; impact(s,N[0]);
+    const p=portOut(N[0]); b.x=p.x+s.ox; b.y=p.y; return;
+  }
+  if(s.phase==='impact'){
+    s.hold-=dt;
+    if(s.hold<=0){
+      if(s.i>=N.length-1){ s.phase='done'; s.done=true; return; }
+      s.edge=edgePath(N[s.i],N[s.i+1]);
+      s.dur=0.26+Math.min(.42,Math.abs(s.edge.p3.y-s.edge.p0.y)/260*0.30);
+      s.t=0; s.phase='travel';
+      pulses.push({e:s.edge,ox:s.ox,t:0,c:FXC[N[s.i].cat]||'#c9c9c9',dur:s.dur*.92});
+    }
+    return;
+  }
+  if(s.phase==='travel'){
+    const e=s.edge;
+    s.t=clamp(s.t+dt/s.dur,0,1);
+    const k=s.t<.62 ? easeOut(s.t/.62)*.80 : .80+easeIn((s.t-.62)/.38)*.20;
+    const q=bez(e,k);
+    const wob=Math.sin(s.t*TAU*2.1)*(1-s.t)*7;
+    b.px=b.x; b.py=b.y; b.x=q.x+s.ox+wob; b.y=q.y;
+    if(s.t>=1){
+      s.i++; s.phase='impact'; s.hold=.20; impact(s,N[s.i]);
+      if(G.stepOnce){ G.stepOnce=false; setPaused(true); }
+    }
+  }
+}
+
+/* ================================================================
+   CAMERA
+   ================================================================ */
+function span(){
+  let x0=1e9,x1=-1e9,y1=0;
+  G.sims.forEach(s=>{ x0=Math.min(x0,s.model.bounds.x0+s.ox);
+                      x1=Math.max(x1,s.model.bounds.x1+s.ox);
+                      y1=Math.max(y1,s.model.bounds.y1); });
+  return {x0,x1,y1};
+}
+function fitModel(){
+  const b=span();
+  G.cam.tz=clamp(Math.min(VW/(b.x1-b.x0+60),VH/(b.y1+60)),.04,2.2);
+  G.cam.tx=(b.x0+b.x1)/2; G.cam.ty=b.y1/2;
+}
+/* width-only fit, anchored at the TOP of the graph — this is what Netron
+   shows you when a model opens: the inputs, not the vertical midpoint. */
+function fitTop(){
+  const b=span();
+  G.cam.tz=clamp(VW/(b.x1-b.x0+80),.12,1.15);
+  G.cam.tx=(b.x0+b.x1)/2;
+  G.cam.ty=VH/2/G.cam.tz;
+}
+function follow(){
+  if(!G.sims.length) return;
+  let x=0,y=0,n=0;
+  for(const q of G.sims){ x+=q.ball.x; y+=q.ball.y; n++; }
+  G.cam.ty=y/n+90;
+  if(G.sims.length>1){
+    G.cam.tx=G.sims.reduce((a,q)=>a+(q.model.bounds.x0+q.model.bounds.x1)/2+q.ox,0)/G.sims.length;
+  } else G.cam.tx=x/n;
+}
+function applyCam(dt){
+  const c=G.cam;
+  c.x=lerp(c.x,c.tx,1-Math.pow(0.0022,dt));
+  c.y=lerp(c.y,c.ty,1-Math.pow(0.0022,dt));
+  c.z=lerp(c.z,c.tz,1-Math.pow(0.004,dt));
+}
+const w2s=(x,y)=>({x:(x-G.cam.x)*G.cam.z+VW/2,y:(y-G.cam.y)*G.cam.z+VH/2});
+const s2w=(x,y)=>({x:(x-VW/2)/G.cam.z+G.cam.x,y:(y-VH/2)/G.cam.z+G.cam.y});
+
+/* ================================================================
+   DRAWING
+   ================================================================ */
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+/* top-rounded / bottom-rounded halves, so the header and body stack like
+   Netron's node-item rows do */
+function rrTop(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x,y+h); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h); ctx.closePath();
+}
+
+function drawEdges(sim){
+  const N=sim.model.nodes, ox=sim.ox;
+  for(const d of N) for(const src of d.ins){
+    const a=N[src], e=edgePath(a,d);
+    const live=a.visited&&d.visited;
+    ctx.save();
+    ctx.strokeStyle= live ? '#cfd6de' : NET.edge;
+    ctx.lineWidth= live?1.6:1;
+    ctx.beginPath();
+    ctx.moveTo(e.p0.x+ox,e.p0.y);
+    ctx.bezierCurveTo(e.p1.x+ox,e.p1.y,e.p2.x+ox,e.p2.y,e.p3.x+ox,e.p3.y);
+    ctx.stroke();
+    /* arrowhead */
+    const q=bez(e,.94),q2=bez(e,1),an=Math.atan2(q2.y-q.y,q2.x-q.x);
+    ctx.translate(e.p3.x+ox,e.p3.y); ctx.rotate(an);
+    ctx.fillStyle= live?'#cfd6de':NET.edge;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-7,-3.2); ctx.lineTo(-7,3.2);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    /* Netron labels its edges with the tensor shape */
+    if(G.cam.z>0.42 && a.shapeOut){
+      const m=bez(e,.5), label=shp(a.shapeOut);
+      ctx.save();
+      ctx.font='10px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+      const tw=ctx.measureText(label).width;
+      ctx.fillStyle=NET.canvas;
+      ctx.fillRect(m.x+ox-tw/2-3,m.y-7,tw+6,13);
+      ctx.fillStyle= live?'#e6e6e6':NET.edgeLabel;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(label,m.x+ox,m.y);
+      ctx.restore();
+    }
+  }
+}
+
+/* flipper arms under the node — the kick that sends the tensor onward */
+function drawFlippers(d,ox,a){
+  const f=d.flip; if(f<=.01) return;
+  const cx=d.x+ox, cy=d.y+d.h/2+3, col=FXC[d.cat]||'#c9c9c9';
+  const rot=lerp(.5,-.35,easeOut(1-f));
+  ctx.save(); ctx.globalAlpha=a*Math.min(1,f*1.6);
+  for(const s of [-1,1]){
+    ctx.save(); ctx.translate(cx+s*20,cy); ctx.scale(s,1); ctx.rotate(rot);
+    ctx.lineCap='round';
+    ctx.strokeStyle='#1a1a1a'; ctx.lineWidth=9;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(22,0); ctx.stroke();
+    ctx.strokeStyle=col; ctx.lineWidth=6; ctx.shadowColor=col; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(22,0); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawNode(d,sim){
+  const ox=sim.ox;
+  const p=w2s(d.x+ox,d.y);
+  const R=d.w*G.cam.z+260;
+  if(p.x<-R||p.x>VW+R||p.y<-R||p.y>VH+R) return;
+
+  const active=(sim.model.nodes[sim.i]===d&&!sim.done)||d.act>.55;
+  const sel=G.selected===d;
+  const arch=G.view==='arch';
+  const col=FXC[d.cat]||'#c9c9c9';
+
+  /* Past → ACTIVE → Future. Even "future" stays fully legible — this is a
+     Netron graph first; the flow just lights it up as the tensor arrives. */
+  let a = arch?1 : (active?1 : (d.visited? .93 : .62));
+
+  const x=d.x+ox-d.w/2, y=d.y-d.h/2;
+  const pop=1+d.hit*.06;
+  ctx.save();
+  ctx.translate(d.x+ox,d.y); ctx.scale(pop,pop); ctx.translate(-(d.x+ox),-d.y);
+  ctx.globalAlpha=a;
+
+  /* outer activation glow */
+  if(d.act>0){
+    ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=10+34*d.act;
+    ctx.fillStyle='rgba(0,0,0,0.001)'; rr(x,y,d.w,d.h,5); ctx.fill(); ctx.restore();
+  }
+
+  /* body */
+  ctx.fillStyle=NET.body; rr(x,y,d.w,d.h,5); ctx.fill();
+
+  /* header — Netron's .node-item-type-<category> */
+  ctx.save(); rrTop(x,y,d.w,HDR_H,5); ctx.clip();
+  ctx.fillStyle=CAT[d.cat]||NET.headerDefault;
+  ctx.fillRect(x,y,d.w,HDR_H);
+  if(d.act>0){ ctx.fillStyle='rgba(255,255,255,'+(d.act*.5).toFixed(3)+')';
+               ctx.fillRect(x,y,d.w,HDR_H); }
+  ctx.restore();
+
+  ctx.fillStyle= d.act>.4 ? '#ffffff' : NET.text;
+  ctx.font=FONT_HDR; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(d.op,d.x+ox,y+HDR_H/2+.5);
+
+  /* body rows: name … <shape> */
+  ctx.font=FONT_ROW;
+  for(let i=0;i<d.rows.length;i++){
+    const ry=y+HDR_H+i*ROW_H;
+    if(i>0){ ctx.strokeStyle='rgba(255,255,255,.055)'; ctx.lineWidth=1;
+             ctx.beginPath(); ctx.moveTo(x+1,ry+.5); ctx.lineTo(x+d.w-1,ry+.5); ctx.stroke(); }
+    ctx.textBaseline='middle';
+    ctx.textAlign='left';  ctx.fillStyle='#c2c2c2';
+    ctx.fillText(d.rows[i][0],x+PAD_X,ry+ROW_H/2);
+    ctx.textAlign='right'; ctx.fillStyle='#9a9a9a';
+    ctx.fillText(d.rows[i][1],x+d.w-PAD_X,ry+ROW_H/2);
+  }
+
+  /* border */
+  ctx.strokeStyle= sel?NET.select : (d.act>.15?col:NET.border);
+  ctx.lineWidth= sel?2:(d.act>.15?1.6:1);
+  rr(x,y,d.w,d.h,5); ctx.stroke();
+
+  /* ripple: a bright band sweeping down through the rows */
+  if(d.ripple>=0&&d.ripple<1){
+    const rp=d.ripple;
+    ctx.save(); rr(x,y,d.w,d.h,5); ctx.clip();
+    const by=y+rp*(d.h+16)-8;
+    const g=ctx.createLinearGradient(0,by-9,0,by+9);
+    g.addColorStop(0,'rgba(255,255,255,0)');
+    g.addColorStop(.5,'rgba(255,255,255,'+((1-rp)*.5).toFixed(3)+')');
+    g.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=g; ctx.fillRect(x,by-9,d.w,18);
+    ctx.restore();
+    /* and an expanding outline pulse */
+    ctx.save(); ctx.globalAlpha=(1-rp)*.75;
+    ctx.strokeStyle=col; ctx.lineWidth=1.6*(1-rp)+.5;
+    const gr=lerp(0,26,rp);
+    rr(x-gr,y-gr,d.w+gr*2,d.h+gr*2,5+gr*.4); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+
+  drawFlippers(d,ox,a);
+
+  /* node name above the box (Netron shows it in the sidebar; here it keeps
+     the chronology readable while the ball moves) */
+  if(G.cam.z>0.5){
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,(G.cam.z-.5)/.2)*(active?1:.72);
+    ctx.font='10px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+    ctx.fillStyle= active?'#ffffff':'#a8a8a8';
+    ctx.fillText(d.name,d.x+ox,y-7);
+    ctx.restore();
+  }
+}
+
+function drawBall(sim){
+  const b=sim.ball;
+  if(sim.phase==='idle') return;
+  for(let i=0;i<b.trail.length;i++){
+    const p=b.trail[i],k=i/b.trail.length;
+    ctx.globalAlpha=k*.40; ctx.fillStyle=p.c;
+    ctx.beginPath(); ctx.arc(p.x,p.y,b.r*k*.8,0,TAU); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  const dx=b.x-b.px,dy=b.y-b.py;
+  ctx.save();
+  ctx.translate(b.x,b.y); ctx.rotate(Math.atan2(dy,dx));
+  ctx.scale(1-.40*b.squash,1+.32*b.squash);
+  ctx.save(); ctx.rotate(b.spin);
+  for(const o of b.orb){
+    const R=b.r*1.6*o.rr;
+    ctx.globalAlpha=.5+.45*Math.sin(G.T*3+o.a);
+    ctx.fillStyle=b.hue; ctx.shadowColor=b.hue; ctx.shadowBlur=7;
+    ctx.beginPath(); ctx.arc(Math.cos(o.a)*R,Math.sin(o.a)*R,o.sz*(.7+.25*b.density),0,TAU); ctx.fill();
+  }
+  ctx.restore(); ctx.globalAlpha=1;
+  ctx.shadowColor=b.hue; ctx.shadowBlur=20+38*b.glow;
+  const g=ctx.createRadialGradient(-b.r*.34,-b.r*.4,1,0,0,b.r);
+  g.addColorStop(0,'#ffffff'); g.addColorStop(.36,'#ffffff');
+  g.addColorStop(.64,b.hue); g.addColorStop(1,'rgba(30,30,30,.9)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,b.r,0,TAU); ctx.fill();
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='rgba(255,255,255,'+(.3+.6*b.glow)+')'; ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.arc(0,0,b.r+3+6*b.glow,0,TAU); ctx.stroke();
+  ctx.restore();
+}
+
+function hexRGB(h){
+  if(h[0]!=='#') return '255,255,255';
+  const n=parseInt(h.slice(1),16);
+  return ((n>>16)&255)+','+((n>>8)&255)+','+(n&255);
+}
+function drawFX(){
+  for(const p of pulses){
+    const k=clamp(p.t,0,1),q=bez(p.e,k);
+    ctx.save(); ctx.globalAlpha=(1-k)*.95;
+    ctx.fillStyle=p.c; ctx.shadowColor=p.c; ctx.shadowBlur=14;
+    ctx.beginPath(); ctx.arc(q.x+p.ox,q.y,4.5*(1-k*.4),0,TAU); ctx.fill();
+    const q2=bez(p.e,Math.max(0,k-.07));
+    ctx.globalAlpha=(1-k)*.4; ctx.lineWidth=2.6; ctx.strokeStyle=p.c;
+    ctx.beginPath(); ctx.moveTo(q2.x+p.ox,q2.y); ctx.lineTo(q.x+p.ox,q.y); ctx.stroke();
+    ctx.restore();
+  }
+  for(const p of parts){
+    const a=clamp(p.life,0,1);
+    ctx.globalAlpha=a; ctx.fillStyle=p.c;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.sz*a,0,TAU); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  for(const s of sparks){
+    const a=clamp(s.life,0,1);
+    ctx.globalAlpha=a; ctx.strokeStyle=s.c; ctx.lineWidth=1.5;
+    ctx.shadowColor=s.c; ctx.shadowBlur=8;
+    ctx.beginPath(); ctx.moveTo(s.x,s.y);
+    ctx.lineTo(s.x-s.vx*.022,s.y-s.vy*.022); ctx.stroke();
+  }
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
+  for(const f of flashes){
+    const k=1-clamp(f.life,0,1), R=f.r*(.25+k*1.5), c=hexRGB(f.c);
+    const g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,R);
+    g.addColorStop(0,'rgba('+c+','+(f.life*.9)+')');
+    g.addColorStop(.45,'rgba('+c+','+(f.life*.26)+')');
+    g.addColorStop(1,'rgba('+c+',0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(f.x,f.y,R,0,TAU); ctx.fill();
+  }
+}
+
+function drawCaption(sim){
+  const M=sim.model, cxw=(M.bounds.x0+M.bounds.x1)/2+sim.ox;
+  const x=clamp(w2s(cxw,0).x,140,VW-140);
+  ctx.save(); ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillStyle='#ffffff'; ctx.font='600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+  ctx.shadowColor='#000'; ctx.shadowBlur=6;
+  ctx.fillText('Model '+M.key+' · '+M.title,x,26);
+  ctx.fillStyle='#a8a8a8'; ctx.font='10.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+  ctx.fillText(M.sub+' · '+fmtN(M.total)+' params',x,41);
+  ctx.restore();
+}
+
+/* ================================================================
+   HUD / DOM
+   ================================================================ */
+let tickT=0;
+function say(m){ const t=el('ticker'); t.textContent=m; t.classList.add('on'); tickT=1.4; }
+function big(m){ const c=el('big'); c.textContent=m; c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop'); }
+
+function buildRail(){
+  const box=el('chips'); box.innerHTML='';
+  const s=G.sims[0]; if(!s) return;
+  s.model.nodes.forEach((d,i)=>{
+    const c=document.createElement('div');
+    c.className='chip';
+    c.innerHTML='<span class="ix">'+i+'</span><span class="sw" style="background:'+
+                (CAT[d.cat]||NET.headerDefault)+'"></span><span class="nm">'+d.name+'</span>';
+    c.onclick=()=>{ select(d); focusNode(d,s); };
+    box.appendChild(c);
+  });
+  markRail(s);
+}
+function markRail(s){
+  if(G.mode==='AB') return;
+  const box=el('chips'); if(!box.children.length) return;
+  for(let i=0;i<box.children.length;i++){
+    const c=box.children[i],d=s.model.nodes[i];
+    if(!d) continue;
+    c.className='chip'+(d.visited&&i!==s.i?' past':'')+
+      (((i===s.i&&!s.done)||(s.done&&i===s.model.nodes.length-1))?' act':'')+
+      (G.selected===d?' sel':'');
+    if(i===s.i&&!G.selected){
+      const par=box.parentElement, r=c.offsetTop-par.scrollTop;
+      if(r<40||r>par.clientHeight-70) par.scrollTop=c.offsetTop-par.clientHeight/2;
+    }
+  }
+}
+
+function renderInspector(d){
+  if(!d){ el('insp').innerHTML='<div class="note" style="border:0;margin-top:14px">'+
+    'Click a node on the graph or in the execution list to inspect it.</div>'; return; }
+  let h='';
+  h+='<div class="ihead"><h3>'+d.name+'</h3>'+
+     '<span class="op" style="background:'+(CAT[d.cat]||NET.headerDefault)+'">'+d.op+'</span></div>';
+  h+='<section><h5>TENSORS</h5><div class="kv">';
+  h+='<b>input</b><span class="t">'+(d.shapeIn?shp(d.shapeIn):'—')+'</span>';
+  h+='<b>output</b><span class="t">'+shp(d.shapeOut)+'</span>';
+  h+='<b>dtype</b><span>'+d.dtype+'</span>';
+  if(d.params) h+='<b>parameters</b><span>'+fmtN(d.params)+'</span>';
+  h+='</div></section>';
+  if(d.rows.length){
+    h+='<section><h5>INITIALIZERS</h5><div class="kv">';
+    for(const [k,v] of d.rows) h+='<b>'+k+'</b><span>'+v+'</span>';
+    h+='</div></section>';
+  }
+  if(d.attrs.length){
+    h+='<section><h5>ATTRIBUTES</h5><div class="kv">';
+    for(const [k,v] of d.attrs) h+='<b>'+k+'</b><span>'+v+'</span>';
+    h+='</div></section>';
+  }
+  if(d.ops.length){
+    h+='<section><h5>OPERATIONS</h5><ol class="ops">';
+    for(const o of d.ops) h+='<li>'+o+'</li>';
+    h+='</ol></section>';
+  }
+  if(d.note) h+='<div class="note">'+d.note+'</div>';
+  el('insp').innerHTML=h;
+}
+function select(d){ G.selected=(G.selected===d)?null:d;
+  renderInspector(G.selected||currentNode()); markRail(G.sims[0]); }
+function currentNode(){ const s=G.sims[0];
+  return s?s.model.nodes[Math.min(s.i,s.model.nodes.length-1)]:null; }
+function focusNode(d,s){ G.cam.tx=d.x+(s?s.ox:0); G.cam.ty=d.y; G.cam.tz=Math.max(G.cam.tz,.85); }
+
+function updateHUD(){
+  const s=G.sims[0]; if(!s) return;
+  if(G.mode==='AB'){
+    el('sModel').textContent='A / B';
+    el('sLayer').textContent=G.sims.map(q=>q.model.key+(q.i+1)).join(' · ');
+    el('sParams').textContent=fmtN(MODELS.A.total)+' · '+fmtN(MODELS.B.total);
+    el('sHits').textContent=G.sims.reduce((a,q)=>a+q.hits,0);
+  }else{
+    el('sModel').textContent=s.model.key;
+    el('sLayer').textContent=(s.i+1)+' / '+s.model.nodes.length;
+    el('sParams').textContent=fmtN(s.model.total);
+    el('sHits').textContent=s.hits;
+  }
+  const frac=G.sims.reduce((a,q)=>a+(q.i+(q.phase==='travel'?q.t:0))/(q.model.nodes.length-1),0)/G.sims.length;
+  el('progfill').style.width=(clamp(frac,0,1)*100).toFixed(1)+'%';
+  const cn=currentNode();
+  el('ptxt').textContent=G.sims.every(q=>q.done)?'complete'
+    :(G.paused?'paused · ':'')+(cn?cn.op:'');
+}
+
+/* ================================================================
+   CONTROLS
+   ================================================================ */
+function setMode(m){
+  G.mode=m;
+  for(const b of el('modelSeg').children) b.classList.toggle('on',b.dataset.m===m);
+  G.selected=null;
+  if(m==='AB'){
+    const wA=MODELS.A.bounds.x1-MODELS.A.bounds.x0;
+    const wB=MODELS.B.bounds.x1-MODELS.B.bounds.x0;
+    G.sims=[mkSim(MODELS.A,-(wB/2+150)),mkSim(MODELS.B,wA/2+150)];
+    el('rail').style.display='none';
+    el('app').style.gridTemplateColumns='0px 1fr 286px';
+  }else{
+    G.sims=[mkSim(MODELS[m],0)];
+    el('rail').style.display='';
+    el('app').style.gridTemplateColumns='228px 1fr 286px';
+  }
+  G.sims.forEach(resetSim);
+  buildRail(); renderInspector(currentNode());
+  if(G.view==='arch') fitModel(); else fitTop();
+  G.cam.x=G.cam.tx; G.cam.y=G.cam.ty; G.cam.z=G.cam.tz;
+  updateHUD();
+}
+function setView(v){
+  G.view=v;
+  for(const b of el('viewSeg').children) b.classList.toggle('on',b.dataset.v===v);
+  if(v==='arch'){ fitModel(); say('Full architecture'); }
+  else { fitTop(); say('Data flow'); }
+}
+function setPaused(p){
+  G.paused=p;
+  const b=el('bPlay'); b.textContent=p?'▶ Play':'⏸ Pause'; b.classList.toggle('hot',!p);
+}
+function restart(){
+  G.sims.forEach(resetSim);
+  parts.length=sparks.length=flashes.length=pulses.length=0;
+  G.selected=null; setPaused(false);
+  renderInspector(currentNode()); markRail(G.sims[0]);
+  say('Propagation restarted'); ac();
+}
+function stepOne(){ G.stepOnce=true; setPaused(false); }
+
+el('modelSeg').onclick=e=>{ const b=e.target.closest('button'); if(b) setMode(b.dataset.m); };
+el('viewSeg').onclick =e=>{ const b=e.target.closest('button'); if(b) setView(b.dataset.v); };
+el('bRestart').onclick=restart;
+el('bPlay').onclick=()=>setPaused(!G.paused);
+el('bStep').onclick=stepOne;
+el('bSpeed').onclick=()=>{
+  G.speed=G.speed===1?2:G.speed===2?0.35:1;
+  el('bSpeed').textContent=G.speed.toFixed(2).replace(/0$/,'')+'×';
+};
+el('zIn').onclick =()=>G.cam.tz=clamp(G.cam.tz*1.3,.04,2.4);
+el('zOut').onclick=()=>G.cam.tz=clamp(G.cam.tz/1.3,.04,2.4);
+el('zFit').onclick=fitModel;
+
+cv.addEventListener('mousedown',e=>{
+  G.drag={x:e.clientX,y:e.clientY,cx:G.cam.tx,cy:G.cam.ty,moved:0};
+  cv.classList.add('drag');
+});
+window.addEventListener('mousemove',e=>{
+  if(!G.drag) return;
+  const dx=e.clientX-G.drag.x,dy=e.clientY-G.drag.y;
+  G.drag.moved=Math.max(G.drag.moved,Math.hypot(dx,dy));
+  G.cam.tx=G.drag.cx-dx/G.cam.z; G.cam.ty=G.drag.cy-dy/G.cam.z;
+  G.cam.x=G.cam.tx; G.cam.y=G.cam.ty;
+});
+window.addEventListener('mouseup',e=>{
+  if(G.drag&&G.drag.moved<5) pick(e);
+  G.drag=null; cv.classList.remove('drag');
+});
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=cv.getBoundingClientRect();
+  const before=s2w(e.clientX-r.left,e.clientY-r.top);
+  G.cam.tz=clamp(G.cam.tz*(e.deltaY<0?1.13:1/1.13),.04,2.4); G.cam.z=G.cam.tz;
+  const after=s2w(e.clientX-r.left,e.clientY-r.top);
+  G.cam.tx+=before.x-after.x; G.cam.ty+=before.y-after.y;
+  G.cam.x=G.cam.tx; G.cam.y=G.cam.ty;
+},{passive:false});
+
+function pick(e){
+  const r=cv.getBoundingClientRect();
+  const w=s2w(e.clientX-r.left,e.clientY-r.top);
+  for(const s of G.sims) for(const d of s.model.nodes){
+    if(Math.abs(w.x-(d.x+s.ox))<d.w/2+8 && Math.abs(w.y-d.y)<d.h/2+8){
+      select(d); tone(900,.05,'sine',.05); return;
+    }
+  }
+  select(null);
+}
+window.addEventListener('keydown',e=>{
+  if(e.key===' '){ e.preventDefault(); if(!G.started) return start(); setPaused(!G.paused); }
+  else if(e.key==='ArrowRight'){ e.preventDefault(); stepOne(); }
+  else if(e.key==='r'||e.key==='R') restart();
+  else if(e.key==='f'||e.key==='F') fitModel();
+  else if(e.key==='a'||e.key==='A') setMode('A');
+  else if(e.key==='b'||e.key==='B') setMode('B');
+  else if(e.key==='c'||e.key==='C') setMode('AB');
+  else if(e.key==='v'||e.key==='V') setView(G.view==='flow'?'arch':'flow');
+  else if(e.key==='m'||e.key==='M') AUDIO=!AUDIO;
+});
+function start(){ ac(); G.started=true; el('ov').classList.add('hide'); restart(); }
+el('go').onclick=start;
+
+/* ================================================================
+   MAIN LOOP
+   ================================================================ */
+let last=performance.now();
+function frame(now){
+  let dt=(now-last)/1000; last=now;
+  if(dt>.25) dt=.25;
+  G.T+=dt;
+
+  if(tickT>0){ tickT-=dt; if(tickT<=0) el('ticker').classList.remove('on'); }
+  G.shake*=Math.pow(0.0016,dt);
+  G.flash*=Math.pow(0.0035,dt);
+
+  for(const s of G.sims){
+    for(const d of s.model.nodes){
+      d.act=Math.max(0,d.act-dt*.42);
+      d.hit=Math.max(0,d.hit-dt*5.5);
+      d.flip=Math.max(0,d.flip-dt*3.2);
+      if(d.ripple>=0){ d.ripple+=dt*2.4; if(d.ripple>1) d.ripple=-1; }
+    }
+    const b=s.ball;
+    b.glow=Math.max(0,b.glow-dt*3.4);
+    b.squash=Math.max(0,b.squash-dt*6.5);
+    b.spin+=dt*(.7+b.density*.5);
+    for(const o of b.orb) o.a+=dt*o.sp*.7;
+    if(s.phase!=='idle'){
+      b.trail.push({x:b.x,y:b.y,c:b.hue});
+      if(b.trail.length>20) b.trail.shift();
+    }
+  }
+  for(let i=parts.length-1;i>=0;i--){
+    const p=parts[i]; p.life-=dt/p.max;
+    p.vx*=.972; p.vy*=.972; p.vy+=110*dt; p.x+=p.vx*dt; p.y+=p.vy*dt;
+    if(p.life<=0) parts.splice(i,1);
+  }
+  for(let i=sparks.length-1;i>=0;i--){
+    const s=sparks[i]; s.life-=dt/s.max;
+    s.vx*=.90; s.vy*=.90; s.x+=s.vx*dt; s.y+=s.vy*dt;
+    if(s.life<=0) sparks.splice(i,1);
+  }
+  for(let i=flashes.length-1;i>=0;i--){ flashes[i].life-=dt/flashes[i].max; if(flashes[i].life<=0) flashes.splice(i,1); }
+  for(let i=pulses.length-1;i>=0;i--){ pulses[i].t+=dt/pulses[i].dur; if(pulses[i].t>=1) pulses.splice(i,1); }
+
+  if(G.started&&!G.paused){ const sdt=dt*G.speed; for(const s of G.sims) stepSim(s,sdt); }
+  if(G.view==='flow'&&G.started&&!G.drag) follow();
+  applyCam(dt);
+
+  /* ---- render ---- */
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle=NET.canvas; ctx.fillRect(0,0,VW,VH);
+
+  ctx.save();
+  ctx.translate((Math.random()-.5)*G.shake,(Math.random()-.5)*G.shake);
+  ctx.translate(VW/2,VH/2); ctx.scale(G.cam.z,G.cam.z); ctx.translate(-G.cam.x,-G.cam.y);
+  for(const s of G.sims) drawEdges(s);
+  for(const s of G.sims) for(const d of s.model.nodes) drawNode(d,s);
+  drawFX();
+  for(const s of G.sims) drawBall(s);
+  ctx.restore();
+
+  if(G.mode==='AB') for(const s of G.sims) drawCaption(s);
+
+  if(G.flash>.01){
+    ctx.fillStyle='rgba(255,255,255,'+(G.flash*.22).toFixed(3)+')';
+    ctx.fillRect(0,0,VW,VH);
+  }
+  updateHUD();
+  requestAnimationFrame(frame);
+}
+
+/* boot */
+const Q=new URLSearchParams(location.search);
+setMode(['A','B','AB'].indexOf(Q.get('model'))>=0?Q.get('model'):'A');
+setView(Q.get('view')==='arch'?'arch':'flow');
+renderInspector(null);
+requestAnimationFrame(frame);
+if(Q.has('play')){
+  AUDIO=false; start();
+  const at=parseInt(Q.get('at'),10);          /* &at=N — deep-link to node N */
+  if(at>0) for(const s of G.sims){
+    let guard=0;
+    while(s.i<at&&!s.done&&guard++<20000) stepSim(s,1/60);
+  }
+}
+</script>
+</body>
+</html>

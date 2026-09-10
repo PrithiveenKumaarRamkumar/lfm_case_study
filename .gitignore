@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# Model weights and ONNX external-data blobs.
+#
+# These are excluded deliberately: together they are 8.69 GB and each one is
+# far over GitHub's hard 100 MB per-file limit. Git LFS would not help either —
+# the free LFS quota is 1 GB.
+#
+#   models/LFM2.5-1.2B-Instruct/model.safetensors           2.18 GB
+#   models/LFM2.5-1.2B-Instruct-DSpark/model.safetensors    0.55 GB
+#   onnx/LFM2.5-1.2B-Instruct/model.onnx.data               4.36 GB
+#   onnx/LFM2.5-1.2B-Instruct-DSpark/model.onnx.data        1.60 GB
+#
+# All of it is reproducible — see "Regenerating the weights" in README.md.
+# The ONNX *topology* files (model.onnx) ARE committed, so the graphs can be
+# inspected and diffed without the weights.
+# ---------------------------------------------------------------------------
+*.safetensors
+*.onnx.data
+*.onnx_data*
+*.bin
+*.gguf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.swp
+.idea/
+.vscode/

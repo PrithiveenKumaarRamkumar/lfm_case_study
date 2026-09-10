@@ -1,0 +1,31 @@
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]Loading weights:   1%|          | 1/148 [00:00<00:57,  2.58it/s]Loading weights:  28%|██▊       | 42/148 [00:00<00:00, 110.90it/s]Loading weights:  45%|████▍     | 66/148 [00:00<00:00, 116.78it/s]Loading weights:  57%|█████▋    | 85/148 [00:00<00:00, 110.51it/s]Loading weights:  70%|███████   | 104/148 [00:01<00:00, 117.58it/s]Loading weights:  83%|████████▎ | 123/148 [00:01<00:00, 126.36it/s]Loading weights:  96%|█████████▌| 142/148 [00:01<00:00, 136.97it/s]Loading weights: 100%|██████████| 148/148 [00:01<00:00, 114.29it/s]
+[ok] loaded Lfm2ForCausalLM: 1170.34 M params, dtype=torch.float32
+     layers: 16 = 10 conv + 6 full_attention
+     attention at indices [2, 5, 8, 10, 12, 14]
+     feed_forward width: 8192 (config.intermediate_size=12288, auto-adjusted)
+     tied embeddings: True  conv_L_cache=3
+[ok] torch forward: logits=(1, 32, 65536)
+C:\Users\TEMP\project\lfm25-onnx\export_lfm2.py:84: UserWarning: Exporting a model while it is in training mode. Please ensure that this is intended, as it may lead to different behavior during inference. Calling model.eval() before export is recommended.
+  torch.onnx.export(
+W0908 16:22:40.324000 22404 site-packages\torch\onnx\_internal\exporter\_registration.py:107] torchvision is not installed. Skipping torchvision::nms
+W0908 16:22:40.327000 22404 site-packages\torch\onnx\_internal\exporter\_registration.py:107] torchvision is not installed. Skipping torchvision::roi_align
+W0908 16:22:40.328000 22404 site-packages\torch\onnx\_internal\exporter\_registration.py:107] torchvision is not installed. Skipping torchvision::roi_pool
+W0908 16:22:40.328000 22404 site-packages\torch\onnx\_internal\exporter\_registration.py:107] torchvision is not installed. Skipping torchvision::deform_conv2d
+[torch.onnx] Obtain model graph for `PrefillWrapper([...]` with `torch.export.export(..., strict=False)`...
+[torch.onnx] Obtain model graph for `PrefillWrapper([...]` with `torch.export.export(..., strict=False)`... ✅
+[torch.onnx] Run decompositions...
+[torch.onnx] Run decompositions... ✅
+[torch.onnx] Translate the graph into ONNX...
+[torch.onnx] Translate the graph into ONNX... ✅
+[torch.onnx] Optimize the ONNX graph...
+[torch.onnx] Optimize the ONNX graph... ✅
+C:\Users\TEMP\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\onnx\_internal\exporter\_onnx_program.py:486: UserWarning: # The axis name: sequence will not be used, since it shares the same shape constraints with another axis: sequence.
+  rename_mapping = _dynamic_shapes.create_rename_mapping(
+[ok] exported in 229.0s
+     model.onnx                 1.82 MB
+     model.onnx.data         4681.37 MB
+
+[verify] logits shape=(1, 32, 65536) max|diff|=5.770e-05 rel=3.51e-06
+         argmax agreement: 100.00%
+
+[done]

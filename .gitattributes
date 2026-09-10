@@ -1,0 +1,8 @@
+# Normalise text, but never let CRLF conversion touch a model file.
+* text=auto
+
+*.onnx        binary
+*.onnx.data   binary
+*.safetensors binary
+*.bin         binary
+*.gguf        binary
