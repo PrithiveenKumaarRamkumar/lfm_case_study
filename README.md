@@ -25,6 +25,14 @@ drafter*, with completely different architectures. Full write-up in
 onnx_session.md              Full session log — architecture findings, gotchas,
                              op-histogram fingerprints, corrections. Start here.
 
+networkconversion_documentation_updated.md
+                             Edge deployment / network conversion study: how
+                             Renesas R-Car V3H (IMPC command lists, tiling,
+                             register banks), TI edgeai-tidl-tools, Qualcomm
+                             QNN EP and Apache TVM each take a trained network
+                             down to hardware — and where the compilation
+                             boundary sits in each.
+
 lfm25-onnx/
   dspark_model.py            PyTorch reconstruction of the DSpark drafter.
                              Nothing on PyPI can load this checkpoint; the
