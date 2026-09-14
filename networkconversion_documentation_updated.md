@@ -482,3 +482,120 @@ If you want visual node-and-edge diagrams similar to how XML topologies are visu
 
 - **Netron (via ONNX export or Netron-TVM):** If you preserve an ONNX checkpoint prior to lowering, [Netron](https://netron.app/) renders interactive layer blocks, input/output tensors, and attributes.
 - **Graphviz / DOT AST Dumps:** TVM provides AST-to-DOT graph exporters (tvm.contrib.relay\_viz or AST dump utilities) that emit .dot files, which can be rendered into SVG/PNG images showing the operator hierarchy and fused subgraphs.
+
+If TVM is going to parse the subgragphs and make the optimizations and handing it over to LLVM / NVCC / CUDA why is there TIDL? Just to make the TIDL subgraphs? and what happens to the unsupported layers by the C7X Cortex or MMA do they get offloaded to ARM and what is the parallel scenario for unsupported layers in qnn
+
+#### 1. Why TIDL Exists if TVM Already Optimizes and Targets LLVM
+
+TIDL (TI Deep Learning) is not just a graph partitioner—it is TI’s proprietary hardware acceleration engine and runtime specifically tailored for the **C7x DSP and MMA (Matrix Multiply Accelerator)** .
+
+- **Standard LLVM Does Not Know the MMA:** While LLVM has standard code-generation targets for generic CPUs and standard DSPs, it has no native concept of TI’s proprietary Matrix Multiply Accelerator (MMA) or the hardware-level streaming engines (SE) and data transfer engines (SA) inside the C7x.
+- **Hand-Crafted Micro-Kernels:** TIDL provides heavily hand-tuned, hardware-optimized assembly micro-kernels for convolutions, matrix multiplications, and pooling that maximize MAC utilization and zero-overhead DMA streaming directly into local L2/SRAM scratchpads.
+- **Hardware-Centric Quantization &amp; Calibration:** TIDL provides the quantization toolchain to profile activations and generate hardware-accurate scaling factors (e.g., INT8/INT16) required specifically by the C7x/MMA fixed-point pipeline.
+- **TVM’s Actual Role Here:** TVM acts as the **high-level frontend and graph partitioner (via BYOC - Bring Your Own Code)** . TVM identifies subgraphs that fit TIDL’s supported layer list, bundles them as black-box TIDL delegate nodes, and passes the heavy lifting of executing those layers to the pre-built TIDL runtime binary.
+
+#### 2. What Happens to Unsupported Layers in edgeai-tidl-tools
+
+When a model contains operators not supported by the C7x/MMA TIDL engine (e.g., non-standard activations, dynamic sequence control, complex slicing):
+
+- **Partitioning &amp; Boundary Extraction:** TVM breaks the model into multiple subgraphs:
+- Supported subgraphs $\rightarrow$ marked as TIDL offload partitions.
+- Unsupported nodes $\rightarrow$ retained by TVM.
+- **Execution Offload (Arm Fallback):**
+- The unsupported layers are kept in TVM's computational graph and lowered via **TVM's standard compilation pipeline** (emitting C/LLVM IR).
+- They are compiled to native machine code targeting the **host Cortex-A (ARM) core** (or compiled as scalar C7x code, depending on your build target options).
+- **Memory Transfers:** At runtime, the TVM graph executor handles intermediate buffer copying: ARM DRAM $\rightarrow$ shared memory buffer $\rightarrow$ C7x/MMA processing $\rightarrow$ return buffer back to ARM.
+
+#### 3. The Parallel Scenario for Unsupported Layers in QNN
+
+In the Qualcomm QNN ecosystem (specifically via the **ONNX Runtime QNN Execution Provider** ), a very similar fallback pattern occurs, but within ONNX Runtime's orchestration architecture:
+
+- **Graph Capability Query:**
+- When the model is loaded, the QNN EP calls GetCapability() to evaluate which nodes can run on the chosen backend (e.g., Hexagon NPU / HTP).
+- **Partitioning:**
+- **Supported Nodes:** Clustered into a single or multiple fused subgraphs, converted into QNN API graph structures, and compiled into the QNN Context Binary (running on the Hexagon NPU).
+- **Unsupported Nodes:** Rejected by the QNN EP during the initial capability scan.
+- **Execution Fallback:**
+- ONNX Runtime’s orchestrator assigns the rejected nodes to the next available provider in its priority list—which is almost always the default **CPU Execution Provider (CPUExecutionProvider)** .
+- During inference, ORT executes the QNN subgraph on the Hexagon NPU, transfers the output tensors across the shared RPC/ION memory boundary back to the host, runs the unsupported operators on the Qualcomm Kryo/ARM CPU using standard ORT CPU kernels, and passes the tensors back to the NPU if another accelerated subgraph follows.
+
+Visualizing the qnn lowered artifact
+
+Once the model is compiled by the [QNN Execution Provider](https://github.com/onnxruntime/onnxruntime-qnn/blob/main/docs/execution_providers/QNN-ExecutionProvider.md) , the compiled target artifact—known as a **QNN Context Binary** —is a proprietary, serialized machine blob rather than an open AST. You cannot open the raw binary directly in Netron to see inner operations, but you can inspect and visualize the lowered artifact using several complementary methods:
+
+#### 1. Visualizing the EPContext ONNX Wrapper in Netron
+
+When QNN EP performs Ahead-of-Time (AOT) compilation, it can serialize the compiled artifact inside an ONNX wrapper model using an **EPContext** node.
+
+- If you configure ep.context\_file / qnn\_save\_context, ORT exports an ONNX model where the accelerated subgraphs are collapsed into an EPContext operator.
+- **Opening in Netron:** You can open this generated .onnx file directly in Netron.
+- **What you can inspect:** Netron will display the graph topology showing which boundary nodes remained on CPU vs. which subgraphs were offloaded into the EPContext block, alongside metadata attributes like source (e.g., QNNExecutionProvider), ep\_cache\_context, and hardware backend targets (HTP, DSP).
+
+#### 2. Inspecting the Compiled Binary with Qualcomm QAIRT Utilities
+
+If you have access to the [Qualcomm AI Runtime SDK (QAIRT)](https://qpm.qualcomm.com/#/main/tools/details/Qualcomm_AI_Runtime_SDK) toolchain alongside onnxruntime-qnn, Qualcomm provides dedicated CLI tools to inspect the compiled context binary:
+
+- **qnn-context-binary-utility:**
+
+Inspects the serialized context binary and dumps the internal structural metadata into human-readable text:
+
+Bash
+
+```
+qnn-context-binary-utility --context_binary <model_cache.bin> --info
+```
+
+This command outputs the internal graph names, tensor quantization encodings (scale, zero point, bit-width), data types, and buffer alignments selected by the HTP compiler.
+
+#### 3. Dumping the Pre-Compiled QNN Graph to JSON / Netron
+
+To view the exact lowered operators, node fusions, and tensor shapes *after* QNN operator translation but *before* binary generation:
+
+- **QNN Model Converter/Dump Flags:** When compiling through QNN SDK utilities or QNN EP logging, you can enable verbose logging:
+
+Python
+
+```
+# In Python session options
+session_options.add_session_config_entry("session.qnn.profiling_level", "basic")
+```
+
+- **Convert via QNN DLC (Deep Learning Container):**
+
+If you convert the ONNX model using Qualcomm's qnn-onnx-converter, it generates a .dlc intermediate container:
+
+- Run qnn-dlc-viewer --input\_dlc model.dlc to launch a browser-based, interactive visual representation of the lowered graph.
+- Run qnn-dlc-info -i model.dlc to output a plain-text table detailing each lowered layer, memory usage, MAC count, and quantization parameters.
+
+Method 2 is not viable
+
+The core difference comes down to **granularity and representation level** :
+
+- **Method 1 (EPContext ONNX Model):** Shows the **coarse macro partition** between host CPU and NPU.
+- **Method 3 (Pre-Compiled / Intermediate Graph):** Shows the **fine-grained micro operator graph** inside the offloaded partition before it gets baked into machine binary.
+
+| **Feature**              | **Method 1: EPContext in Netron**                                         | **Method 3: Intermediate Lowered Graph**                                                 |
+|--------------------------|---------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| **What it Represents**   | The  **post-compilation deployable wrapper**                              | The  **pre-compilation translated layer graph**                                          |
+| **Level of Detail**      | Macro-level (Black box)                                                   | Micro-level (White box)                                                                  |
+| **Subgraphs Inside NPU** | Collapsed into a single opaque EPContext operator                         | Expanded into individual nodes (fused GEMMs, activations, layouts)                       |
+| **Visible Elements**     | Graph partitions, CPU fallbacks, boundary tensor names/shapes             | Individual QNN/HTP ops, quantization encodings (scale/zero-point), channel layouts       |
+| **Primary Use Case**     | Verifying CPU vs. NPU fallback boundaries and packaging deployable models | Verifying operator fusion, unsupported op transformations, and layer-by-layer topologies |
+
+#### What You Actually See in Method 1 (EPContext)
+
+When you instruct onnxruntime-qnn to generate an EPContext model (via session options like ep.context\_file), ORT takes all the contiguous operators supported by the HTP backend, compiles them into a binary blob, and wraps that blob inside an ONNX node called **EPContext** .
+
+When you open this .onnx file in Netron:
+
+- **Inside the partition:** You do **not** see the individual convolutions, layer norms, or matrix multiplies. They are swallowed by the EPContext node, which stores the compiled NPU context in its attributes.
+- **Outside the partition:** You see which operators were rejected by the QNN EP and remain on the host CPU.
+
+#### What You Actually See in Method 3 (Pre-Compiled Graph)
+
+Method 3 captures the model **after** ONNX Runtime has partitioned and translated the nodes into the Qualcomm execution dialect, but **before** the Qualcomm compiler packs them into an unreadable machine binary.
+
+In this visualization:
+
+- **The partition is transparent:** You can inspect the actual graph of operators that will run on the NPU.
+- **Detailed tensor changes:** You see how ONNX operators were transformed (e.g., how standard ONNX ops were converted to quantized fixed-point primitives, explicit NHWC layout transposes, and fused activations).

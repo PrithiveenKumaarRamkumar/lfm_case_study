@@ -20,6 +20,15 @@
 *.bin
 *.gguf
 
+# QNN compilation artifacts, same reasoning (session 3):
+#   qnn/**/model_fixed_ctx_qnn.bin                          1.13 GB   (*.bin)
+#   qnn/LFM2.5-1.2B-Instruct-DSpark/ir/*.dlc                2.30 GB
+#   qnn/LFM2.5-1.2B-Instruct/ir/*.dlc                       5.22 GB
+#   qnn/**/saver_output/params.bin                          9.19 GB   (*.bin)
+# The EPContext wrapper, every QNN JSON graph dump and saver_output.c
+# ARE committed - those are the artifacts you actually read.
+*.dlc
+
 # Python
 __pycache__/
 *.py[cod]

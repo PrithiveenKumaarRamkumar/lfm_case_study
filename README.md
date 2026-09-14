@@ -1,8 +1,8 @@
 # LFM2.5 case study — ONNX export, Netron inspection, and a data-flow visualiser
 
 Two Liquid AI checkpoints taken apart, converted to ONNX, verified numerically,
-and then turned into an interactive visualisation of the tensor moving through
-the graph.
+compiled for a Qualcomm NPU from an Intel laptop, and then turned into an
+interactive visualisation of the tensor moving through the graph.
 
 | | **LFM2.5-1.2B-Instruct** | **LFM2.5-1.2B-Instruct-DSpark** |
 |---|---|---|
@@ -44,10 +44,21 @@ lfm25-onnx/
   serve_both.py              Netron server, one child process per model
   check_served.py            Verifies what each port *actually* serves
 
+  fix_shapes.py              Freeze dynamic dims (QNN EP rejects them) without
+                             rewriting the multi-GB weight blob
+  to_fp16.py                 fp32 → fp16 cast, kept for the record
+  qnn_compile.py             Compile with the Qualcomm QNN EP and emit every
+                             artifact that lets you see the lowering
+  qnn_ceiling_probe.py       Bisects the HTP preparer with a weights-only graph
+  serve_netron.py            One Netron child per artifact, ports 8080–8087
+
   models/                    config.json, tokenizer, README for both models
                              (weights excluded — see below)
   onnx/                      Exported graphs. model.onnx (topology) committed;
                              model.onnx.data (weights) excluded.
+  qnn/                       QNN EP output: the EPContext wrapper, the lowered
+                             QNN graphs as JSON, the ONNX→QNN op traces and
+                             saver_output.c. Context binaries and .dlc excluded.
   official_onnx/             Liquid AI's own ONNX export, topology only —
                              used as an independent cross-check
   ref/                       SGLang / onnxruntime-genai / optimum-onnx sources
@@ -74,9 +85,20 @@ cannot be pushed here.
 | `onnx/LFM2.5-1.2B-Instruct-DSpark/model.onnx.data` | 1.60 GB |
 | `models/LFM2.5-1.2B-Instruct-DSpark/model.safetensors` | 0.55 GB |
 
-Everything else — every script, config, log, reference source, and the two ONNX
-**topology** files — is committed, so the graphs can still be inspected, diffed
-and reviewed without downloading a single byte of weights.
+The QNN compilation adds five more, on the same grounds:
+
+| File | Size |
+|---|---:|
+| `qnn/LFM2.5-1.2B-Instruct/ir/*.dlc` | 4.86 GB |
+| `qnn/LFM2.5-1.2B-Instruct-DSpark/ir/*.dlc` | 2.14 GB |
+| `onnx/LFM2.5-1.2B-Instruct/model_fp16.onnx.data` | 2.18 GB |
+| `qnn/LFM2.5-1.2B-Instruct-DSpark/htp/model_fixed_ctx_qnn.bin` | 1.05 GB |
+| `onnx/LFM2.5-1.2B-Instruct-DSpark/model_fp16.onnx.data` | 0.80 GB |
+
+Everything else — every script, config, log, reference source, the ONNX
+**topology** files, the `EPContext` wrapper and every QNN graph dump — is
+committed, so the graphs can still be inspected, diffed and reviewed without
+downloading a single byte of weights.
 
 ### Regenerating the weights
 
@@ -128,6 +150,43 @@ port 8081: 612 nodes   429.94M params  Conv=0  Softmax=5   -> DSpark drafter
 > server has no HTTP Range support — requesting the external data pulls the
 > whole file into the server process (measured: 4 491 MB peak). Browse topology
 > freely; use the Netron desktop app to inspect weight *values*.
+
+---
+
+## Compiling for a Qualcomm NPU, from an Intel laptop
+
+`onnxruntime-qnn` ships an **x86_64** build — `libs/amd64/` carries
+`HtpPrepare.dll`, so the whole ahead-of-time compile runs on the host and no
+Snapdragon is involved. Full write-up in [`onnx_session.md`](onnx_session.md)
+§S3; the short version:
+
+```bash
+pip install onnxruntime-qnn                       # 2.6.0, bundles QAIRT 2.50.40
+cd lfm25-onnx
+
+# QNN EP rejects dynamic dims outright - freeze them first (this rewrites the
+# 0.7 MB topology only, and reuses the existing model.onnx.data)
+python fix_shapes.py onnx/LFM2.5-1.2B-Instruct-DSpark/model.onnx batch=1 block=9 ctx=12
+
+# method 1 (EPContext wrapper + context binary) and method 3 (lowered QNN
+# graph, op trace, EP input graphs) in one pass
+python qnn_compile.py onnx/LFM2.5-1.2B-Instruct-DSpark/model_fixed.onnx \
+       qnn/LFM2.5-1.2B-Instruct-DSpark/htp --backend htp --embed 0 \
+       --json-graph --op-trace --input-graph --opt soc_model=69 --opt htp_arch=75
+
+python serve_netron.py --open                     # ports 8080-8087
+```
+
+The drafter compiles whole — 574 ONNX nodes → 620 QNN ops, zero CPU fallback,
+1.72 GB of fp32 becoming a 1.13 GB Hexagon context binary in 137 s. The 1.2B
+target lowers cleanly (893 QNN ops, `Conv` → `DepthWiseConv2d`) but does **not**
+finalise: one `GatherNd` in the causal mask is rejected by the HTP backend and
+fragments the graph. Both limits, and the fp16 workaround that turns out to be a
+vendor bug, are documented in §S3.9–S3.11.
+
+> `soc_model` defaults to `0` (unknown) and nothing large will finalise against
+> it. Pass a real numeric SoC id — and only numeric: chip *names* are silently
+> ignored with a warning, despite what the QNN EP docs say.
 
 ---
 

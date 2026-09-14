@@ -1,0 +1,177 @@
+{
+  "graph_name": "QNNExecutionProvider_QNNExecutionProvider_6601204020686766192_2_0",
+  "initializers": [
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "unsqueeze_20",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_388)",
+        "Mul (node_mul_363)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.model.layers.1.ffn_norm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_248)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "val_57",
+      "num_elements": 1,
+      "size_bytes": 4,
+      "used_by_operators": [
+        "Add (node_add_84)",
+        "Add (node_add_140)",
+        "Add (node_add_178)",
+        "Add (node_add_234)",
+        "Add (node_add_272)",
+        "Add (node_add_335)",
+        "Add (node_add_300)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "val_228",
+      "num_elements": 1,
+      "size_bytes": 4,
+      "used_by_operators": [
+        "Mul (node_Mul_231)",
+        "Mul (node_Mul_229)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.lm_head.weight",
+      "num_elements": 134217728,
+      "size_bytes": 536870912,
+      "used_by_operators": [
+        "Gather (node_embedding)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "unsqueeze_21",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_405)",
+        "Mul (node_mul_380)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.model.layers.0.operator_norm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_90)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "unsqueeze_17",
+      "num_elements": 6144,
+      "size_bytes": 24576,
+      "used_by_operators": [
+        "Conv (node_Conv_1372_token_71)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "val_54",
+      "num_elements": 1,
+      "size_bytes": 4,
+      "used_by_operators": [
+        "Pow (node_pow_1)",
+        "Pow (node_pow_2)",
+        "Pow (node_pow_3)",
+        "Pow (node_pow_4)",
+        "Pow (node_pow_5)",
+        "Pow (node_pow_7)",
+        "Pow (node_pow_6)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.model.layers.0.ffn_norm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_151)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.model.layers.2.operator_norm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_284)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "unsqueeze_19",
+      "num_elements": 6144,
+      "size_bytes": 24576,
+      "used_by_operators": [
+        "Conv (node_Conv_1374_token_74)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.model.layers.2.self_attn.k_layernorm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_339)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.model.layers.2.self_attn.q_layernorm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_310)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "model.model.layers.1.operator_norm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_187)"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "datatype": "QNN_DATATYPE_INT_64",
+      "name": "attention_mask",
+      "num_elements": 32,
+      "size_bytes": 256
+    },
+    {
+      "datatype": "QNN_DATATYPE_INT_64",
+      "name": "input_ids",
+      "num_elements": 32,
+      "size_bytes": 256
+    }
+  ],
+  "summary": {
+    "num_initializers": 15,
+    "num_inputs": 2,
+    "total_graph_size_bytes": 536978444,
+    "total_graph_size_mb": 512.1025505065918,
+    "total_initializer_size_bytes": 536977932,
+    "total_input_size_bytes": 512
+  }
+}

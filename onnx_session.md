@@ -1919,3 +1919,939 @@ port 8081:   738,879 bytes  612 nodes   429.94M params  Conv=0  Softmax=5
 | §10 (limitations) | Limitation #1 (confidence-head input) is **resolved** — confirmed from `dspark_planner.build_markov_embed_stack`. Limitation #2 (paged KV pool) stands. Batch-pinned-to-1 reproduced. |
 | §2 / §3 | Unchanged and independently confirmed, including by Liquid AI's own ONNX export. |
 
+
+
+---
+---
+
+# Session 3 — 2026-09-13 · Netron re-run, and a QNN EP compile on an x86_64 host
+
+**Session log & findings (appended)**
+Host: Windows 11 Pro (26100) · Intel i7-1065G7, 4C/8T Ice Lake, **no NPU** · 15.6 GB RAM · Python 3.13.15
+Working dir: `C:\Users\ramkumar.pri\project\lfm_case_study\`
+
+Third independent run from a bare Python (`pip list` at the start returned
+exactly one package: `pip`). §§1–11 and all of S2 reproduced. What is new is
+everything *downstream* of the ONNX file: both graphs were compiled with the
+**Qualcomm QNN Execution Provider** — on an Intel laptop, with no Snapdragon
+anywhere — and the lowered result was opened in Netron.
+
+The vocabulary below ("Method 1", "Method 3") is
+[`networkconversion_documentation_updated.md`](networkconversion_documentation_updated.md)
+→ *Visualizing the qnn lowered artifact*: **Method 1** = the EPContext ONNX
+wrapper (macro view, CPU/NPU boundary), **Method 2** = `qnn-context-binary-utility`
+from the QAIRT SDK (declared not viable), **Method 3** = the pre-compiled QNN
+graph (micro view, individual lowered ops). That document was regenerated from
+the source `.docx` with **docling 2.126.0** in this session; the QNN section is
+what it gained.
+
+---
+
+## S3.0 Summary of what this session adds
+
+| # | Finding | Status vs §§1–11 / S2 |
+|---|---|---|
+| S3.1 | Third clean-machine reproduction; the drafter reproduces **exactly** — node counts, op histogram, residuals — the target drifts by 3 nodes on `transformers` 5.17 | extends S2.12 |
+| S3.1 | The dynamo exporter bakes the **exporting machine's absolute source paths** into every node's metadata, so the same graph is not the same file | new |
+| S3.2 | **`onnxruntime-qnn` installs and AOT-compiles on x86_64.** No Qualcomm device needed — the wheel ships `HtpPrepare.dll` for amd64 | entirely new |
+| S3.3 | On amd64 only the `htp`, `ir` and `saver` backends exist; `cpu`/`gpu` fail to load — those DLLs are not in the wheel | new |
+| S3.4 | A dynamic dim does not cause CPU fallback — it **fails the whole session** with `EP_FAIL` | new |
+| S3.5 | `soc_model` is the difference between a context binary and `QNN_COMMON_ERROR_MEM_ALLOC`; and chip *names* are silently ignored, contradicting the docs | new |
+| S3.6 | **Method 1 achieved for the drafter**: 1-node EPContext ONNX + a 1.13 GB HTP context binary | new |
+| S3.7 | **Method 3 achieved for both models**: the full ONNX→QNN op mapping, with fusions and layout changes visible | new |
+| S3.8 | The lowering **breaks the embedding tie** — the 134.2 M-param shared embedding is materialised twice | contradicts S2.12's "single initializer, two consumers" *after* lowering |
+| S3.9 | HTP rejects exactly one op in the target (`GatherNd`, error 3110) and fragments the graph; the drafter goes over whole | new |
+| S3.10 | The target cannot be finalised at fp32. Bisecting with a weights-only graph **refutes** the obvious size explanation: 5.5 GiB finalises fine | new |
+| S3.11 | float16 is a dead end in 2.6.0: the `Reciprocal` op builder emits an fp32 constant into an fp16 graph. Minimal repro, both models | new (looks like a vendor bug) |
+| S3.12 | **Netron 9.2.8 ships a QNN loader** (`qnn.js`, marked *Experimental*). It opens every JSON dump; it recognises the context binary and refuses it by name | corrects the docx's premise that you need Qualcomm's "QNN Netron" |
+| S3.13 | `backend_type=ir` produces a `.dlc` **without the QAIRT SDK** — and a DLC is a ZIP of FlatBuffers using a *different* op dialect again | new |
+| S3.14 | `backend_type=saver` produces a 50,344-line replayable C program — and 9.19 GB of `params.bin` | new |
+
+---
+
+## S3.1 Third reproduction — what is stable, what drifts
+
+Same two scripts, same checkpoints (byte-identical downloads: 2,340,697,936 and
+591,458,386), `torch 2.14.0` as in S2 but `transformers` **5.17.0** rather than
+5.16.1.
+
+| | S2 (26200) | S3 (26100) |
+|---|---:|---:|
+| drafter export | 132.3 s | **187.5 s** |
+| drafter nodes / initializers / params | 612 / 79 / 429.94 M | **612 / 79 / 429.94 M** |
+| drafter `max\|diff\|` logits · hidden · confidence | 2.503e-05 · 2.134e-05 · 2.682e-07 | **identical to every printed digit** |
+| target export | 229.0 s | **407.3 s** |
+| target nodes / initializers / params | 872 / 171 / 1170.34 M | **869 / 175 / 1170.34 M** |
+| target `max\|diff\|` / argmax | 5.770e-05 / 100.00% | **identical** |
+| `model.onnx.data` (target) | 4,681,367,552 B | **4,681,367,552 B** |
+
+The drafter reproduces exactly — same node count, same op histogram line for
+line, same residuals. The target moves by three nodes (`Concat` 30 → 27) and
+four initializers, from the `transformers` minor bump; every architectural count
+in §8's fingerprint table still holds: 10 Conv, 10 Split, 6 Softmax, 16 Sigmoid,
+45 RMSNorm groups, 1 Cos / 1 Sin, 6 IsNaN, 7 Where.
+
+### The drafter graph is identical and the file still is not
+
+`model.onnx` is 782,806 B here against S2's 738,879 B — a 43,927 B difference in
+a graph with the same 612 nodes, the same 79 initializers, the same 688
+`value_info` entries and byte-identical initializers. Diffing node by node, 609
+of the 612 nodes differ, and every difference is in metadata:
+
+```
+S2  "pkg.torch.onnx.stack_trace": "File \"C:\\Users\\TEMP\\project\\lfm25-onnx\\dspark_model.py\", line 289, …
+S3  "pkg.torch.onnx.stack_trace": "File \"C:\\Users\\ramkumar.pri\\project\\lfm_case_study\\lfm25-onnx\\dspark_model.py\", line 289, …
+```
+
+**The dynamo exporter bakes the exporting machine's absolute source paths into
+every node**, four `metadata_props` deep (`namespace`,
+`pkg.torch.onnx.class_hierarchy`, `pkg.torch.onnx.fx_node`,
+`pkg.torch.onnx.stack_trace`). 23 extra characters × ~3 occurrences × 609 nodes
+is the whole delta. Two consequences worth knowing: an ONNX export is **not
+byte-reproducible across machines** even when the graph is, so `sha256` is the
+wrong equality test for these files (the op histogram is the right one); and a
+shipped `.onnx` quietly carries your directory layout and username.
+
+`docling` is worth noting as a toolchain shortcut: installing it drags in
+`torch`, `transformers`, `accelerate`, `huggingface-hub`, `numpy` and
+`safetensors`, so after Task 1 the only things still missing for the export were
+`onnx`, `onnxruntime`, `onnxscript` and `netron`.
+
+---
+
+## S3.2 `onnxruntime-qnn` installs and compiles on x86_64
+
+This was the surprise of the session. The expectation going in was that QNN is
+an ARM64/Snapdragon story and that an Intel laptop could, at best, read
+documentation about it. Not so:
+
+```
+onnxruntime_qnn-2.6.0-cp313-cp313-win_amd64.whl     189.7 MB
+```
+
+Inside, `libs/amd64/`:
+
+```
+    96,839,376  HtpPrepare.dll                  <- the offline graph preparer
+    96,839,376  QnnHtp.dll
+     9,613,008  Genie.dll
+     3,467,984  onnxruntime_providers_qnn.dll
+     3,450,576  QnnSystem.dll
+     1,632,464  QnnIr.dll
+       956,112  QnnHtpNetRunExtensions.dll
+       536,784  QnnSaver.dll
+```
+
+and separately `libs/arm64ec/` with the on-device pieces (`QnnGpu.dll`,
+`QnnHtpV73Stub.dll`, `libQnnHtpV68/73/81Skel.so`, …) that amd64 does not get.
+`onnxruntime-qnn` 2.6.0 bundles **QAIRT 2.50.40**; it is a *plugin* EP, so it
+loads into stock `onnxruntime` 1.30.0 rather than needing a vendor fork.
+
+The whole compile happens host-side and produces a deployable binary:
+
+```python
+import onnxruntime as ort
+import onnxruntime_qnn as qnn_ep
+
+ort.register_execution_provider_library("QNNExecutionProvider", qnn_ep.get_library_path())
+devices = [d for d in ort.get_ep_devices() if d.ep_name == "QNNExecutionProvider"]
+
+so = ort.SessionOptions()
+so.add_session_config_entry("ep.context_enable", "1")          # method 1
+so.add_session_config_entry("ep.context_file_path", "...\\model_fixed_ctx.onnx")
+so.add_session_config_entry("ep.context_embed_mode", "0")      # separate .bin
+so.add_provider_for_devices(devices, {
+    "backend_type": "htp",
+    "soc_model": "69", "htp_arch": "75",
+    "dump_json_qnn_graph": "1", "json_qnn_graph_dir": "...", # method 3
+    "enable_framework_op_trace": "1", "framework_op_trace_dir": "...",
+    "dump_qnn_ep_input_graph": "1", "dump_qnn_ep_input_graph_dir": "...",
+})
+sess = ort.InferenceSession("...\\model_fixed.onnx", sess_options=so)
+```
+
+Two things the EP tells you about the host, both harmless:
+
+```
+[W] File mapped weights feature is only available on Windows arm64 devices for
+    QNN API versions >= 2.32. Feature will be disabled by default
+    OrtEpDevice ep_name='QNNExecutionProvider' vendor='Qualcomm'
+                type=OrtHardwareDeviceType.CPU        <- no Hexagon to bind to
+```
+
+The EP advertises itself against the **CPU** hardware device, because there is
+no NPU in the machine to enumerate. It compiles anyway. It cannot *run* the
+result, which is the whole point of ahead-of-time compilation.
+
+---
+
+## S3.3 On amd64 there are only three backends
+
+`backend_type` documents five values (`cpu`, `gpu`, `htp`, `saver`, `ir`). Two
+of them cannot work here, and the reason is simply that the DLLs are not in the
+wheel — `libs/amd64/` has no `QnnCpu.dll` and no `QnnGpu.dll`, even though
+`onnxruntime_qnn.get_qnn_cpu_path()` will happily hand you a path to one:
+
+```
+--backend cpu  ->  QNN SetupBackend failed Unable to load backend, error: load library failed
+--backend gpu  ->  QNN SetupBackend failed Unable to load backend, error: load library failed
+```
+
+Usable on x86_64: **`htp`** (compile for the NPU), **`ir`** (lower and serialise
+to `.dlc`), **`saver`** (record the QNN API calls as C). All three were used
+below.
+
+---
+
+## S3.4 A dynamic dim fails the session — it does not fall back to CPU
+
+The QNN EP documentation says it "does not support models with dynamic shapes".
+The natural reading — given how the docx describes ONNX Runtime's fallback
+orchestration — is that the dynamic parts stay on the CPU EP. They do not.
+Handing the EP the drafter exactly as exported:
+
+```
+$ python qnn_compile.py onnx/LFM2.5-1.2B-Instruct-DSpark/model.onnx qnn/_dynamic_probe --backend htp
+onnxruntime.capi.onnxruntime_pybind11_state.EPFail:
+  [ONNXRuntimeError] : 11 : EP_FAIL : Dynamic shape is not supported yet, for input: val_16
+[mem] peak working set 1.10 GB
+```
+
+`InferenceSession()` raises; there is no session and no partial offload. Note
+`val_16` — an *internal* tensor, not one of the five graph inputs, so the error
+does not point at the thing you have to change. The peak working set of 1.10 GB
+also says it never got as far as materialising the 1.72 GB of weights: this is a
+fast, early refusal during capability discovery.
+
+Fixing it is cheap if you do not use the obvious tool. `python -m
+onnxruntime.tools.make_dynamic_shape_fixed` round-trips the whole model, which
+for the 1.2B target means materialising and rewriting 4.68 GB of initializers.
+Unnecessary — external-data locations resolve relative to the model file, so
+writing the patched 1.8 MB topology *into the same directory* reuses the
+existing blob untouched. That is all `fix_shapes.py` does:
+
+```
+$ python fix_shapes.py onnx/LFM2.5-1.2B-Instruct-DSpark/model.onnx batch=1 block=9 ctx=12
+[ok] model_fixed.onnx  0.74 MB
+     batch -> 1   (8 occurrence(s) in graph I/O)
+     block -> 9   (6 occurrence(s))
+     ctx   -> 12  (2 occurrence(s))
+
+$ python fix_shapes.py onnx/LFM2.5-1.2B-Instruct/model.onnx sequence=32
+[ok] model_fixed.onnx  1.80 MB
+```
+
+`block=9` and `ctx=12` are the drafter's own export shapes (§S2.6 — `block_size`
+is exactly 9); `sequence=32` is the target's.
+
+---
+
+## S3.5 `soc_model` decides whether you get a binary or an allocator error
+
+With shapes fixed, the drafter reached the QNN backend, translated cleanly —
+and died:
+
+```
+EP_FAIL : Failed to finalize QNN graph.
+          Error: QNN_COMMON_ERROR_MEM_ALLOC: Memory allocation related error., Code: 1002
+[mem] peak working set 5.02 GB
+```
+
+5.02 GB on a 15.6 GB box is not an out-of-memory condition, so the message is
+misleading. It is also not fixed by any of the memory-shaped knobs:
+
+| provider option | result |
+|---|---|
+| *(defaults)* | `MEM_ALLOC` |
+| `htp_arch=73` | `MEM_ALLOC` |
+| `num_graph_prepare_threads=1` | `MEM_ALLOC` |
+| `htp_graph_finalization_optimization_mode=0` | `MEM_ALLOC` |
+| `vtcm_mb=8` | `MEM_ALLOC` |
+| **`soc_model=69`** | **session created in 135.8 s** |
+| **`htp_arch=73` + `soc_model=43`** | **session created in 129.7 s** |
+
+`soc_model` defaults to `"0"` — *unknown chip* — and the offline HTP preparer
+cannot size a graph this large for a chip it has not been told about. Naming any
+real SoC fixes it. `htp_arch` alone does not; `soc_model` alone does.
+
+And a documentation correction while we are here. The QNN EP docs say
+`soc_model` accepts chip-family names for well-known parts. This build does not:
+
+```
+soc_model=SM8650  ->  [W] Ignoring malformed soc_model, expecting a >=0 integer.
+soc_model=SM8750  ->  [W] Ignoring malformed soc_model, expecting a >=0 integer.
+soc_model=69      ->  ok
+```
+
+It is a warning, not an error, so the run continues with `soc_model=0` and then
+fails later in a way that has nothing obviously to do with the option you set.
+The rest of this session uses **`soc_model=69`, `htp_arch=75`**, which the
+artifacts confirm resolved to:
+
+```json
+"compilation_target": { "device_id": 0, "htp_arch": "V75", "soc_model": 69 }
+```
+
+---
+
+## S3.6 Method 1 — the EPContext wrapper, on the drafter
+
+```
+$ python qnn_compile.py onnx/LFM2.5-1.2B-Instruct-DSpark/model_fixed.onnx \
+      qnn/LFM2.5-1.2B-Instruct-DSpark/htp --backend htp --embed 0 \
+      --json-graph --op-trace --input-graph --opt soc_model=69 --opt htp_arch=75
+
+[ok] session created in 137.1s   providers=['QNNExecutionProvider', 'CPUExecutionProvider']
+[mem] peak working set 5.15 GB
+
+             1,124  model_fixed_ctx.onnx            <- method 1
+     1,130,196,264  model_fixed_ctx_qnn.bin         <- the context binary
+           331,536  QNNExecutionProvider_..._1_0.json          <- method 3
+             9,574  QNNExecutionProvider_..._1_0_tensor_log.json
+           523,842  main_graph.0_qnn_ep_input_graph.json
+           523,842  main_graph.1_qnn_ep_input_graph.json
+           305,124  qnn_op_trace.json
+```
+
+**1.72 GB of fp32 ONNX became a 1.13 GB Hexagon context binary in 137 seconds on
+a laptop with no Hexagon in it.** The wrapper is 1,124 bytes and contains exactly
+what the docx says it should:
+
+```
+node QNNExecutionProvider_QNNExecutionProvider_10258722332297493299_1_0
+     op=EPContext  domain=com.microsoft
+  inputs  ['input_ids', 'positions', 'target_hidden', 'ctx_positions', 'prev_token_ids']
+  outputs ['logits', 'hidden_states', 'confidence']
+  attr partition_name = QNNExecutionProvider_..._1_0
+  attr ep_cache_context = model_fixed_ctx_qnn.bin
+  attr main_context    = 1
+  attr embed_mode      = 0
+  attr source          = QNNExecutionProvider
+  attr ep_sdk_version  = v2.50.40.260831140417
+  attr is_multi_soc_ep_context = 0
+  attr max_size        = 0
+
+metadata_props:
+  ep_compatibility_info.QNNExecutionProvider = v2:6:2.50.40:5.50.0:75:69:0:0
+                                                             ^^^^ ^^ arch V75, SoC 69
+```
+
+Opened in Netron it is a single black box: five inputs go in, three outputs come
+out, and the 620 operators in between are gone. That is the point — Method 1
+shows the *partition boundary*, not the contents. Here the boundary is the whole
+model: **zero CPU fallback nodes**.
+
+`embed_mode=0` splits the blob out as `..._qnn.bin` instead of embedding it in
+the ONNX, which is what makes the wrapper 1 KB and the binary inspectable on its
+own. With `embed_mode=1` you get one 1.13 GB `.onnx`.
+
+---
+
+## S3.7 Method 3 — the lowered QNN graph
+
+`dump_json_qnn_graph=1` writes the QNN graph as JSON at *compose* time — before
+`graphFinalize`. That ordering matters more than it sounds: in the runs that
+died at finalize with `MEM_ALLOC`, **the Method 3 artifact was still produced**.
+Method 3 survives failures that Method 1 does not, which is exactly what you
+want from a debugging view.
+
+The drafter, ONNX vs QNN:
+
+```
+onnx/…-DSpark/model.onnx                 612 nodes
+  -> ORT level-1 optimisation            574 nodes handed to the EP
+  -> QNN translation                     620 QNN ops, 739 tensors, 1 subgraph
+                                         0 unsupported
+```
+
+and the mapping, reconstructed by joining `qnn_op_trace.json` against
+`main_graph.1_qnn_ep_input_graph.json`:
+
+| count | ONNX | → QNN (`qti.aisw`) |
+|---:|---|---|
+| 126 | `Mul` | `ElementWiseMultiply` |
+| 55 | `Reshape` | `Reshape` |
+| 53 | `Add` | `ElementWiseAdd` |
+| 48 | `MatMul` | `FullyConnected` **and** an extra `Reshape` each |
+| 46 | `Unsqueeze` | `Reshape` |
+| 30 | `Slice` | `StridedSlice` |
+| 27 | `Pow` / `ReduceMean` / `Sqrt` / `Reciprocal` | `ElementWisePower` / `ReduceMean` / `ElementWiseSquareRoot` / **`ElementWiseDivide`** |
+| 26 | `Concat` | `Concat` |
+| 15 | `Sub` | `ElementWiseSubtract` |
+| 10 | `Expand` | **`ElementWiseMultiply`** |
+| 10 | `MatMul` | `MatMul` |
+| 6 | `Sigmoid` | `Sigmoid` |
+| 5 | **`Mul` + `Softmax`** | **`Softmax`** (fused) |
+| 2 | `Gather` | `Cast` **and** `Gather` |
+| 2 | `Sin` / `Cos` | `ElementWiseSin` / `ElementWiseCos` |
+| 1 | `Gemm` + `Reshape` | `FullyConnected` + `Reshape` (fused) |
+
+Things worth reading off that table:
+
+- **`MatMul` splits in two.** 58 ONNX `MatMul`s become 48 `FullyConnected` (a
+  weight times an activation — a Linear) and 10 `MatMul` (activation times
+  activation — the QK and PV products of 5 attention layers). QNN's dialect
+  makes the distinction the ONNX opset does not.
+- **Every `FullyConnected` drags a `Reshape` with it**, because it is rank-2 and
+  the graph is rank-3. That, plus `Unsqueeze → Reshape`, is why 55 ONNX
+  `Reshape`s become 150.
+- **`Reciprocal` becomes `ElementWiseDivide`** with a synthesised numerator
+  constant. Harmless here; fatal at fp16 (S3.11).
+- **`Expand` becomes `ElementWiseMultiply`** — QNN has no broadcast-materialising
+  op, so a broadcast is a multiply by ones. Ten of them: the GQA head fan-out.
+- **`Mul` + `Softmax` fuse into one `Softmax`** — `ScaleSoftmaxFusion`, once per
+  attention layer, all five. This is precisely the "verifying operator fusion"
+  use case Method 3 is advertised for.
+- **`Gather` needs a `Cast` first** — the int64 token ids are narrowed to int32.
+- The 27 RMSNorm groups are still 27 groups of four ops. **No RMSNorm fusion
+  happens at this level**; whatever the HTP compiler does with them happens
+  later, inside `graphFinalize`, and is not visible in any of these dumps.
+
+`fusion_count` from the trace, verbatim:
+
+```json
+{"OrtNodeUnit": 613, "ScaleSoftmaxFusion": 5, "ReshapeGemmFusionGroup": 2}
+```
+
+The target tells the same story with convolutions in it (783 nodes in → 893 QNN
+ops out, 1 subgraph, 0 unsupported, via the `ir` backend):
+
+| count | ONNX | → QNN |
+|---:|---|---|
+| 188 | `Mul` | `ElementWiseMultiply` |
+| 95 | `Add` | `ElementWiseAdd` |
+| 93 | `MatMul` | `FullyConnected` + `Reshape` |
+| 45 | `Pow`/`ReduceMean`/`Sqrt`/`Reciprocal` | the RMSNorm four |
+| 34 | `Slice` | `StridedSlice` |
+| 20 | `Conv` | `Reshape` (2 per conv) |
+| 12 | `Neg` | `ElementWiseNeg` |
+| 12 | `Expand` | `ElementWiseMultiply` |
+| 12 | `MatMul` | `MatMul` |
+| 10 | `Split` | `Split` |
+| **10** | **`Conv`** | **`DepthWiseConv2d`** |
+| 7 | `Where` | `ElementWiseSelect` |
+| 6 | `Reshape` + `Transpose` | `Transpose` (fused) |
+| 6 | `IsNaN` | `IsNan` |
+| 6 | `Softmax` | `Softmax` |
+| 1 | `GatherND` | `GatherNd` |
+| 1 | `And` | `ElementWiseAnd` |
+
+**LFM2's ShortConv is a depthwise convolution and QNN says so out loud.** The 10
+`Conv` nodes lower to `DepthWiseConv2d`, each wrapped in two `Reshape`s because
+QNN's depthwise op is 2-D and the sequence is 1-D. This is the clearest
+independent confirmation of §3's architecture reading so far — it comes from
+Qualcomm's op-support logic, not from reading `transformers`.
+
+Note also the difference between the two models' softmaxes: the drafter's scale
+is a separate `Mul` and gets fused into `Softmax`; the target's is already folded
+into Q by the exporter, so its 6 `Softmax`es pass through alone.
+
+### The two `_qnn_ep_input_graph` dumps are a before/after pair
+
+`dump_qnn_ep_input_graph=1` writes one JSON **per optimisation pass**, and
+diffing them shows the layout optimiser working:
+
+```
+target  main_graph.0   813 nodes   Transpose=60   node_Conv_1372 …
+target  main_graph.1   783 nodes   Transpose=30   node_Conv_1372_token_71 …
+                       40 nodes removed, 10 added (the renamed Convs)
+```
+
+Thirty of the sixty `Transpose`s around the ShortConv stack are cancelled before
+QNN ever sees the graph. For the drafter, which has no convolutions, `.0` and
+`.1` are byte-identical (523,842 B each) — nothing for the optimiser to do.
+
+---
+
+## S3.8 The lowering breaks the embedding tie
+
+S2.12 recorded, of the drafter, that weight tying is visible in ONNX as *one*
+initializer with two consumers:
+
+```
+initializer  shared_embedding [65536, 2048]
+  consumed by 2 nodes: Gather(node_embedding)  and  Transpose(node_t)
+```
+
+After lowering, it is two:
+
+```
+     536,870,912  t_transpose        [65536, 2048]     <- the lm_head
+     536,870,912  shared_embedding   [65536, 2048]     <- the embedding lookup
+      83,886,080  val_10_transpose   [2048, 10240]
+      67,108,864  val_987_transpose  [65536, 256]
+      67,108,864  markov_head.markov_w1.weight  [65536, 256]
+      50,331,648  val_982_transpose  [2048, 6144]      … and 100 more
+```
+
+Every `Transpose(initializer) → MatMul` in the exported graph is constant-folded
+into a *new* static tensor for `FullyConnected`, and where the original is still
+consumed elsewhere — as the tied embedding is — both copies live in the graph.
+
+| | ONNX params | QNN static tensors | inflation |
+|---|---:|---:|---:|
+| drafter | 429.94 M (1.72 GB) | **574.65 M (2.14 GiB)** | +144.71 M |
+| target | 1170.34 M (4.68 GB) | **1305.35 M (4.86 GiB)** | +135.01 M |
+
+Both deltas are ≈ 134.2 M = 65536 × 2048, i.e. one extra copy of the tied
+embedding, in each model. The `.dlc` files confirm the arithmetic from the
+outside: 2,298,839,400 B and 5,221,782,944 B, which is the static-tensor total
+plus 250 KB / 383 KB of container.
+
+A practical consequence: **`..._tensor_log.json` under-reports.** For the drafter
+it counts 29 "initializers" totalling 576.57 MB, because it only sees tensors
+that kept their ONNX names; the graph itself carries **114 static tensors
+totalling 2.14 GiB**, 38 of them `*_transpose`. The graph JSON is the honest
+number.
+
+Two smaller things the tensor table shows. Every one of the 739 tensors has
+`quant_params` `{definition: 0x7fffffff, encoding: 0x7fffffff}` — undefined —
+confirming this is a pure float graph with no quantization encodings anywhere;
+Method 3's "scale/zero-point" column simply has nothing in it for these models.
+And all four int64 graph inputs are narrowed at the boundary:
+
+```
+100 (INT_64)  input_ids [1,9]        ->  50 (INT_32)  input_ids_int32
+100           positions [1,9]        ->  50           positions_cast_int32
+100           ctx_positions [1,12]   ->  50           ctx_positions_cast_int32
+100           prev_token_ids [1,9]   ->  50           prev_token_ids_int32
+```
+
+QNN's index ops are int32, so `int64 -> int32` casts appear for free on every
+token-id input.
+
+---
+
+## S3.9 The target: HTP rejects exactly one operator
+
+Under `backend_type=ir` the target is one clean 893-op partition with zero
+unsupported nodes. Under `backend_type=htp` it fragments, and verbose logging
+names the culprit:
+
+```
+[W] QNN.backendValidateOpConfig() failed for node `node_GatherND_34`
+    of type `GatherNd` with error code 3110
+[W] QNN.backendValidateOpConfig() failed for node `node_GatherND_34_2`
+    of type `GatherNd` with error code 3110
+```
+
+One node. `GatherND` appears exactly once in the target's op histogram (§S2.12),
+in the causal-mask construction that `transformers` 5.x emits. The `ir` backend
+accepts it — it validates against the IR schema, not against silicon — while the
+HTP backend's op-config validator refuses it, and ONNX Runtime cuts the graph
+there. The surviving HTP partition that got dumped is `..._2_0`, 138 nodes and
+1.02 GiB of weights: embedding + `Gather`, two ShortConv layers
+(`DepthWiseConv2d` ×2, `Split` ×2), 13 `FullyConnected`, 7 RMSNorm groups.
+
+This is Method 1's advertised use case reduced to a single line of evidence:
+*one* unsupported operator is enough to split an otherwise fully-offloadable
+1.2 B model into CPU and NPU regions.
+
+---
+
+## S3.10 …and then fails to finalise, for a reason that is *not* size
+
+Even with `soc_model` set, the target never finalises:
+
+```
+EP_FAIL : Failed to finalize QNN graph.
+          Error: QNN_COMMON_ERROR_MEM_ALLOC, Code: 1002
+[mem] peak working set 6.08 GB   peak commit 6.28 GB
+```
+
+6.08 GB against 15.6 GB of RAM and a 24.6 GB pagefile: the host is not out of
+memory. The drafter finalises at 2.14 GiB of static tensors and the target fails
+at 4.86 GiB, which suggests a limit somewhere in between — so
+`qnn_ceiling_probe.py` bisects it with a graph that is nothing but weights, a
+chain of N `[4096, 4096]` fp32 `MatMul`s at 64 MiB each, written straight into
+the external-data file so that building a 5.5 GiB probe costs 5.5 GiB of disk
+and 64 MiB of RAM:
+
+```
+ 32 layers    2.00 GiB static   OK    session created in 120.5s
+ 60 layers    3.75 GiB static   OK    session created in 220.3s
+ 64 layers    4.00 GiB static   OK    session created in 158.0s
+ 72 layers    4.50 GiB static   OK    session created in 146.4s
+ 78 layers    4.88 GiB static   OK    session created in 169.1s
+ 88 layers    5.50 GiB static   OK    session created in 214.0s
+```
+
+**There is no ceiling — the hypothesis is wrong.** 78 layers is 4.88 GiB, more
+static weight than the target's 4.86 GiB, and it finalises in 169 seconds. 5.5
+GiB finalises too. Whatever `MEM_ALLOC` means here, it is not "too many weight
+bytes".
+
+Two more controls point the same way:
+
+- **Input size is irrelevant.** Recompiling the target at `sequence=8` instead
+  of 32 fails identically, at exactly the same 6.08 GB peak working set. The
+  largest activation in the failing partition is 1 MiB (`[1, 32, 8192]`), so
+  there was never much to save.
+- **The drafter is not fragmented and it works**; the target is fragmented and
+  does not. The partition that fails carries `input_ids` and `attention_mask` in
+  and hands **six** tensors back out — `add_262 [1,32,2048]`,
+  `_unsafe_view_1 [1,32,32,64]`, `val_235 [1,32,32,32]`,
+  `convert_element_type_default [1,32,1]`, and `_to_copy [1,32]` with data type
+  1288, i.e. **boolean**. It also contains `model.lm_head.weight` (536.9 MB)
+  despite ending in the middle of the network, which is what partitioning around
+  a rejected node in the mask path does to a graph.
+
+So the honest reading is: on this host the fp32 target cannot be finalised, the
+proximate trigger is the `GatherNd` fragmentation of S3.9 rather than its size,
+and the fp16 escape hatch is closed by S3.11. **Method 3 works on the target;
+Method 1 does not.** For the drafter both work.
+
+---
+
+## S3.11 float16 is a dead end in onnxruntime-qnn 2.6.0
+
+The obvious way under a static-weight ceiling is to halve the weights. HTP does
+its float math in fp16 anyway from QAIRT 2.35 onward, so this should be free.
+`to_fp16.py` converts cleanly:
+
+```
+target   4.68 GB -> 2,340,679,680 B   (164.6 s convert, peak 6.85 GB)
+drafter  1.72 GB ->   859,886,080 B   ( 56.3 s convert, peak 3.34 GB)
+```
+
+Both then fail to *compose*, identically:
+
+```
+[E] Data length mismatch for static tensor.
+    node_name: node_rsqrt  tensor_name: node_rsqrt_divisor
+    size calculated from shape: 2, tensor.clientBuf.dataSize: 4
+EP_FAIL : Failed to compose Qnn graph.
+```
+
+`node_rsqrt_divisor` is the constant the QNN `Reciprocal` builder synthesises to
+turn `1/x` into `ElementWiseDivide(1, x)` — see the mapping tables in S3.7. In an
+fp16 graph the builder declares that tensor float16 (2 bytes from its shape) but
+still hands over a 4-byte float32 buffer, and the wrapper rejects its own
+tensor. Minimal repro: **any float16 ONNX graph containing `Reciprocal`.** Both
+LFM2.5 graphs qualify — `Reciprocal` is the `1/sqrt(…)` in every RMSNorm, 45 of
+them in the target and 27 in the drafter — so neither can be compiled at fp16
+with this release. The drafter, which compiles perfectly at fp32, is the cleaner
+demonstration that this is about the dtype and not about the model.
+
+Net: on this host the target can be **lowered and inspected** (Method 3) but not
+**finalised into a context binary** (Method 1). The drafter does both.
+
+---
+
+## S3.12 Netron 9.2.8 has a QNN loader
+
+The docx says the JSON dumps go into "QNN Netron", implying Qualcomm's fork.
+Upstream Netron has had a QNN reader since some point before 9.2.8 —
+`netron/qnn.js`, 11,132 bytes, first line `// Experimental` — and it takes ORT's
+dumps directly. The match condition is narrow:
+
+```js
+const obj = await context.peek('json');
+if (obj && obj['model.cpp'] !== undefined && obj.graph) {
+    return context.set('qnn.json', obj);
+}
+```
+
+and ORT's dump satisfies it — the top level is
+`{'Total MACs per inference', 'Total parameters', 'converter_command',
+'copyright_str', 'graph', 'model.bin', 'model.cpp', 'op_types'}`, with
+`model.cpp` and `model.bin` both `"N/A"` and `copyright_str` reading
+`Copyright (c) Microsoft Corporation`.
+
+Rather than trust that reading, `qnn.js` was driven headlessly under Node
+v24.21.0 with a stub `context` (the module has no imports, only
+`export const ModelFactory`), which is what Netron itself would do:
+
+```
+QNNExecutionProvider_..._1_0.json (drafter, htp)
+  match()  -> "qnn.json"   format QNN
+  inputs   -> ctx_positions:int64[1,12]  input_ids:int64[1,9]  positions:int64[1,9] …
+  nodes    -> 620
+```
+
+Every JSON this session produced was checked the same way:
+
+| artifact | Netron |
+|---|---|
+| `QNNExecutionProvider_*_N_0.json` (lowered graph) | **opens** — 620 / 893 / 138 nodes |
+| `main_graph.{0,1}_qnn_ep_input_graph.json` | **opens** — 574 / 783 nodes |
+| `*_tensor_log.json` | no match — it is a size report, not a graph |
+| `qnn_op_trace.json` | no match — it is a mapping table, not a graph |
+| `*.dlc` | no match |
+| `model_fixed_ctx_qnn.bin` | **matches, then refuses** (below) |
+
+The context binary is the interesting one. `qnn.js` carries four 16-byte
+signatures for QNN serialized contexts; ours starts
+
+```
+00000000: 0000 0002 0000 0003 0000 0000 0000 0001
+```
+
+which is the fourth of them. Netron therefore *recognises* the file and then
+deliberately stops:
+
+```
+match() -> "qnn.serialized"
+open()  -> THREW: Error loading QNN model.: File contains undocumented QNN serialized context.
+```
+
+That is the docx's "you cannot open the raw binary directly in Netron", pinned
+down to the exact code path and the exact message. It is a refusal by design,
+not a parse failure.
+
+One caveat on how much Netron can tell you: `qnn-metadata.json` has **7 entries**
+— `Conv2d`, `DepthWiseConv2d`, `FullyConnected`, `PoolAvg2d`, `Pool`,
+`Transpose`, `Neuron`. Ops outside that list still render, with correct types,
+shapes and edges, but with generic `input`/`output` port names instead of
+documented ones. For these two graphs that is most of the nodes.
+
+---
+
+## S3.13 `backend_type=ir` gives you a `.dlc` without the QAIRT SDK
+
+Method 3's second half in the docx assumes Qualcomm's `qnn-onnx-converter` and
+`qnn-dlc-viewer`. Neither is installed here, and neither is needed:
+
+```
+$ python qnn_compile.py …/model_fixed.onnx …/ir --backend ir --dlc --no-ctx
+     2,298,839,400  QNNExecutionProvider_..._1_0.dlc     (drafter)
+     5,221,782,944  QNNExecutionProvider_..._1_0.dlc     (target, 233.2 s, peak 9.21 GB)
+```
+
+A `.dlc` turns out to be an ordinary **ZIP** (`PK\x03\x04`) of five members —
+with deliberately invalid CRCs, so `zipfile` needs `_expected_crc = None` to read
+them:
+
+| member | drafter | target | what it is |
+|---|---:|---:|---|
+| `dlc.metadata.history.2.3.0` | 794 | 793 | JSON, provenance |
+| `dlc.metadata2.3.0` | 326 | 326 | JSON, version header |
+| `model` | 223,512 | 341,840 | FlatBuffer, magic `NETD` |
+| `model.params` | 22,736 | 39,392 | FlatBuffer, magic `NETP` |
+| `model.params.bin` | 2,298,590,948 | 5,221,399,508 | raw weights |
+
+`model.params.bin` lands within ~2 KB and ~500 B of the static-tensor totals
+computed from the JSON graphs in S3.8 — the DLC stores the weights verbatim,
+fp32, duplication and all. The history member records its own provenance:
+
+```json
+{"converterCommand": {"tool": "qnn-net-run",
+                      "converterVersion": "2.50.40.260831140417",
+                      "args": {"backend": "libQnnIr.so(.dll)",
+                               "model": "QNNExecutionProvider_..._1_0.so(.dll)"}}}
+```
+
+And the strings inside `model` show a **third** op dialect. The same three-node
+smoke test that the JSON dump calls `Conv2d` / `Relu` / `ElementWiseAdd` appears
+in the DLC as `Conv2d` / **`Neuron`** / **`Eltwise_Binary`** — the older
+SNPE-lineage names. So "the lowered graph" is not one thing: the JSON dump, the
+DLC and the saver trace name the same operators three different ways.
+
+Netron will not open a `.dlc`, and there is no `qnn-dlc-viewer` on x86_64 without
+the SDK — the JSON dump is the viewable form.
+
+---
+
+## S3.14 `backend_type=saver` gives you the QNN API calls as C
+
+```
+$ python qnn_compile.py …/model_fixed.onnx …/saver --backend saver --no-ctx
+     9,194,368,424  saver_output/params.bin
+         7,695,978  saver_output/saver_output.c        50,344 lines
+```
+
+`QnnSaver.dll` intercepts every QNN API call and writes a compilable C program
+that replays it. It writes into the **current working directory**, not into any
+configured output dir, which is why `qnn_compile.py` `chdir`s for this backend.
+The call histogram is the whole EP protocol in one view:
+
+```
+   1197  backendValidateOpConfig      <- "can you take this op?"  (~2x per node)
+    816  tensorCreateGraphTensor
+    620  graphAddNode                 <- "here it is"
+      1  each of backendCreate, deviceCreate, contextCreate,
+         graphCreate, graphFinalize, contextFree, deviceFree, backendFree
+```
+
+This is `GetCapability()` made concrete: 1,197 validation calls against 620
+nodes actually added. And an individual node is fully legible:
+
+```c
+Qnn_OpConfigV1_t …_node_linear_0_v1 = {
+    "node_linear", "qti.aisw", "FullyConnected", 0, …_params,
+    2, …_inputs, 1, …_outputs };
+//  input 0  "target_hidden"     type 0 (APP_WRITE)  dtype 562 (FLOAT_32)  [1, 12, 10240]
+//  input 1  "val_10_transpose"  type 4 (STATIC)     dtype 562             [2048, 10240]
+//  output 0 "linear_reshape"    type 3 (NATIVE)     dtype 562             [12, 2048]
+static float …_input_1_data[20971520];
+fread(…_input_1_data, 4, 20971520, fp);
+```
+
+— the transposed weight of S3.8, in `[out, in]` order, being read out of
+`params.bin` at 83,886,080 bytes.
+
+The cost is the catch: **`params.bin` is 9.19 GB for a model with 2.14 GiB of
+unique weights**, because the saver writes a tensor's buffer on every call that
+carries it. It was deleted after inspection; `saver_output.c` is kept.
+
+---
+
+## S3.15 Method 2, revisited
+
+The docx marks Method 2 — `qnn-context-binary-utility --context_binary … --info`
+— as not viable, on the grounds that it needs the QAIRT SDK. That holds: the
+`onnxruntime-qnn` wheel ships backend DLLs, not CLI tools, and there is no
+`qnn-context-binary-utility` anywhere on this machine.
+
+What is worth adding is that most of what Method 2 promises is available anyway,
+from artifacts Method 1 and Method 3 already produce:
+
+| Method 2 would tell you | available instead from |
+|---|---|
+| internal graph names | `partition_name` attr on the EPContext node; every JSON dump |
+| tensor data types | `data_type` in the graph JSON (562 = `FLOAT_32`, 306 = `UINT_32`, …) |
+| tensor sizes / buffer budget | `*_tensor_log.json` (`total_graph_size_mb`, per-initializer bytes) |
+| quantization encodings | `quant_params` per tensor in the graph JSON — all `0x7fffffff` (undefined) here, these graphs are float |
+| which SoC it was built for | `ep_compatibility_info` metadata + `compilation_target` in the op trace |
+
+The one thing genuinely lost is what the HTP compiler did *inside* `graphFinalize`
+— tiling, VTCM assignment, weight layout, kernel selection. None of the four
+artifact families reach past that boundary. Which is the same boundary §S3.7
+noted for RMSNorm fusion, and the same one the docx draws between Method 3
+("before it gets baked into machine binary") and Method 1 ("the post-compilation
+deployable wrapper").
+
+---
+
+## S3.16 Viewing it
+
+`serve_netron.py` starts one Netron child per artifact — same one-server-per-
+process constraint as `serve_both.py` (§11), for the same reason.
+
+```
+$ python serve_netron.py --open
+http://localhost:8080   1,860,576 B  source ONNX - target
+http://localhost:8081     782,806 B  source ONNX - drafter
+http://localhost:8082       1,124 B  METHOD 1 - EPContext wrapper (drafter)
+http://localhost:8083     331,536 B  METHOD 3 - lowered QNN graph (drafter, htp)
+http://localhost:8084     510,781 B  METHOD 3 - lowered QNN graph (target, ir)
+http://localhost:8085      81,568 B  METHOD 3 - lowered QNN graph (target, htp partition)
+http://localhost:8086     523,842 B  METHOD 3 - what QNN EP was handed (drafter)
+http://localhost:8087     752,654 B  METHOD 3 - what QNN EP was handed (target)
+```
+
+Verified by parsing what each port actually returns, not by reachability — §11's
+lesson still applies, and it applies to the JSON dumps too:
+
+```
+8080  match   1,860,576 B  ONNX: 869 nodes
+8081  match     782,806 B  ONNX: 612 nodes
+8082  match       1,124 B  ONNX: 1 nodes, ops=['EPContext']
+8083  match     331,536 B  QNN json: 620 nodes, 739 tensors
+8084  match     510,781 B  QNN json: 893 nodes, 1130 tensors
+8085  match      81,568 B  QNN json: 138 nodes, 181 tensors
+8086  match     523,842 B  QNN json: 574 nodes, 671 tensors
+8087  match     752,654 B  QNN json: 783 nodes, 992 tensors
+```
+
+Reading order for the two methods side by side: **8081 → 8086 → 8083 → 8082** is
+the drafter's whole journey — source ONNX (612 nodes), what ORT handed the EP
+(574), the lowered QNN dialect (620), and the single `EPContext` node it all
+collapses into. **8080 → 8087 → 8084 → 8085** is the same for the target, ending
+not in a wrapper but in the 138-node fragment that `GatherNd` left behind.
+
+---
+
+## S3.17 Timings and memory on this box
+
+| step | time | peak WS |
+|---|---:|---:|
+| `pip install docling` (+torch, transformers, …) | ~24 min | |
+| `pip install onnx onnxruntime onnxscript netron` | ~2 min | |
+| `pip install onnxruntime-qnn` (189.7 MB wheel) | ~2 min | |
+| download both checkpoints (2.93 GB, sequential curl) | 7 min 5 s | |
+| docling DOCX → Markdown | 51.2 s cold start + 13.8 s | |
+| `export_dspark.py` | 187.5 s | |
+| `export_lfm2.py` | 407.3 s | |
+| `to_fp16.py` (target) | 197.3 s | 6.85 GB |
+| QNN htp compile, drafter (→ context binary) | **137.1 s** | 5.15 GB |
+| QNN ir compile, drafter (→ 2.30 GB dlc) | not recorded | 4.89 GB |
+| QNN saver, drafter (→ 7.70 MB C + 9.19 GB bin) | not recorded | 3.24 GB |
+| QNN ir compile, target (→ 5.22 GB dlc) | **233.2 s** | 9.21 GB |
+| QNN htp compile, target | fails at finalize | 6.08 GB |
+| QNN htp compile, target fp16 | fails at compose | 3.15 GB |
+
+---
+
+## S3.18 What was produced
+
+```
+lfm25-onnx/
+  fix_shapes.py            freeze dynamic dims without rewriting the weight blob
+  to_fp16.py               fp32 -> fp16 (kept for the record; see S3.11)
+  qnn_compile.py           the QNN EP driver - all four artifact families
+  qnn_ceiling_probe.py     bisect the offline preparer's static-tensor limit
+  serve_netron.py          one Netron child per artifact, ports 8080-8087
+
+  onnx/LFM2.5-1.2B-Instruct/
+    model.onnx  1.86 MB  + model.onnx.data  4.68 GB
+    model_fixed.onnx  1.80 MB          sequence=32, reuses the same .data
+    model_fp16.onnx   1.80 MB  + model_fp16.onnx.data  2.34 GB
+  onnx/LFM2.5-1.2B-Instruct-DSpark/
+    model.onnx  0.78 MB  + model.onnx.data  1.72 GB
+    model_fixed.onnx  0.74 MB          batch=1 block=9 ctx=12
+    model_fp16.onnx   0.74 MB  + model_fp16.onnx.data  0.86 GB
+
+  qnn/LFM2.5-1.2B-Instruct-DSpark/
+    htp/   model_fixed_ctx.onnx              1,124 B        <- METHOD 1
+           model_fixed_ctx_qnn.bin   1,130,196,264 B        <- the context binary
+           QNNExecutionProvider_..._1_0.json   331,536 B    <- METHOD 3
+           QNNExecutionProvider_..._1_0_tensor_log.json
+           main_graph.{0,1}_qnn_ep_input_graph.json
+           qnn_op_trace.json                   305,124 B
+    ir/    QNNExecutionProvider_..._1_0.dlc  2,298,839,400 B
+    saver/ saver_output/saver_output.c       7,695,978 B    (params.bin 9.19 GB, deleted)
+  qnn/LFM2.5-1.2B-Instruct/
+    htp/       the 138-node fragment + both EP input graphs (finalize failed)
+    htp_fp16/  both EP input graphs (compose failed - S3.11)
+    ir/        QNNExecutionProvider_..._1_0.dlc  5,221,782,944 B
+               QNNExecutionProvider_..._1_0.json   510,781 B  <- METHOD 3
+               qnn_op_trace.json                   443,026 B
+  qnn/_dynamic_probe/   the EP input graphs from the dynamic-shape refusal (S3.4)
+```
+
+`.gitignore` gains `*.dlc`; `*.bin` and `*.onnx.data` already covered the context
+binary and the weight blobs. Everything committed is topology, JSON or source.
+
+Reproduce:
+
+```powershell
+$env:PYTHONUTF8 = "1"
+pip install docling                                    # brings torch + transformers
+pip install onnx onnxruntime onnxscript netron onnxruntime-qnn
+python export_dspark.py ; python export_lfm2.py
+
+python fix_shapes.py onnx/LFM2.5-1.2B-Instruct-DSpark/model.onnx batch=1 block=9 ctx=12
+python fix_shapes.py onnx/LFM2.5-1.2B-Instruct/model.onnx sequence=32
+
+python qnn_compile.py onnx/LFM2.5-1.2B-Instruct-DSpark/model_fixed.onnx `
+       qnn/LFM2.5-1.2B-Instruct-DSpark/htp --backend htp --embed 0 `
+       --json-graph --op-trace --input-graph --opt soc_model=69 --opt htp_arch=75
+python qnn_compile.py onnx/LFM2.5-1.2B-Instruct/model_fixed.onnx `
+       qnn/LFM2.5-1.2B-Instruct/ir --backend ir --dlc --no-ctx --json-graph --op-trace
+
+python serve_netron.py --open
+```
+
+---
+
+## S3.19 Net changes to the earlier sections
+
+| Section | Change |
+|---|---|
+| §5 (environment) | Add: `docling` is a cheap way to get the whole torch/transformers stack. Node.js is useful — Netron's format readers are standalone ES modules you can run headlessly. |
+| §7 / S2.11 (Netron) | Still correct. Extend: Netron 9.2.8 also reads **QNN JSON graphs** (`qnn.js`, experimental, 7 documented ops) and explicitly refuses QNN context binaries. |
+| §8 (fingerprints) | Reproduced a third time. The drafter is exact; the target moved 872 → 869 nodes on `transformers` 5.17. |
+| §10 (limitations) | Add a third: **the exported graphs are not NPU-deployable as they stand.** Dynamic dims must be frozen first (S3.4), and at fp32 the 1.2B target exceeds what the offline HTP preparer will finalise (S3.10). |
+| S2.12 (weight tying) | Holds for the ONNX graph; **does not survive lowering** — QNN materialises a second copy of the tied embedding (S3.8). |
+| — | The prefill-only export choice (§6) turns out to matter here too: a graph with KV-cache plumbing would carry dynamic `past_sequence_length` dims that QNN EP rejects outright. |

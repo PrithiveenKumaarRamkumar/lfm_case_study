@@ -1,0 +1,364 @@
+{
+  "graph_name": "QNNExecutionProvider_QNNExecutionProvider_10258722332297493299_1_0",
+  "initializers": [
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.3.self_attn.q_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_1262)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "norm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_2016)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "val_15",
+      "num_elements": 1,
+      "size_bytes": 4,
+      "used_by_operators": [
+        "Add (node_add_12)",
+        "Add (node_add_2398)",
+        "Add (node_add_1878)",
+        "Add (node_add_1358)",
+        "Add (node_add_838)",
+        "Add (node_add_318)",
+        "Add (node_add_41)",
+        "Add (node_add_126)",
+        "Add (node_add_95)",
+        "Add (node_add_511)",
+        "Add (node_add_561)",
+        "Add (node_add_646)",
+        "Add (node_add_615)",
+        "Add (node_add_1031)",
+        "Add (node_add_1081)",
+        "Add (node_add_1166)",
+        "Add (node_add_1135)",
+        "Add (node_add_1551)",
+        "Add (node_add_1601)",
+        "Add (node_add_1686)",
+        "Add (node_add_1655)",
+        "Add (node_add_2071)",
+        "Add (node_add_2121)",
+        "Add (node_add_2206)",
+        "Add (node_add_2175)",
+        "Add (node_add_2591)",
+        "Add (node_add_2641)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "val_11",
+      "num_elements": 1,
+      "size_bytes": 4,
+      "used_by_operators": [
+        "Pow (node_pow_1)",
+        "Pow (node_pow_34)",
+        "Pow (node_pow_27)",
+        "Pow (node_pow_20)",
+        "Pow (node_pow_13)",
+        "Pow (node_pow_6)",
+        "Pow (node_pow_2)",
+        "Pow (node_pow_4)",
+        "Pow (node_pow_3)",
+        "Pow (node_pow_8)",
+        "Pow (node_pow_9)",
+        "Pow (node_pow_11)",
+        "Pow (node_pow_10)",
+        "Pow (node_pow_15)",
+        "Pow (node_pow_16)",
+        "Pow (node_pow_18)",
+        "Pow (node_pow_17)",
+        "Pow (node_pow_22)",
+        "Pow (node_pow_23)",
+        "Pow (node_pow_25)",
+        "Pow (node_pow_24)",
+        "Pow (node_pow_29)",
+        "Pow (node_pow_30)",
+        "Pow (node_pow_32)",
+        "Pow (node_pow_31)",
+        "Pow (node_pow_36)",
+        "Pow (node_pow_37)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.0.input_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_36)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.2.post_attention_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_1188)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.0.self_attn.k_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_237)",
+        "Mul (node_mul_94)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.1.self_attn.k_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_633)",
+        "Mul (node_mul_490)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.3.post_attention_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_1584)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.1.input_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_432)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.0.self_attn.q_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_74)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.1.post_attention_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_792)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "markov_head.markov_w1.weight",
+      "num_elements": 16777216,
+      "size_bytes": 67108864,
+      "used_by_operators": [
+        "Gather (node_embedding_1)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.4.input_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_1620)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.2.self_attn.q_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_866)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.4.post_attention_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_1980)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "shared_embedding",
+      "num_elements": 134217728,
+      "size_bytes": 536870912,
+      "used_by_operators": [
+        "Gather (node_embedding)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "hidden_norm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_16)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.2.input_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_828)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.2.self_attn.k_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_1029)",
+        "Mul (node_mul_886)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.4.self_attn.k_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_1821)",
+        "Mul (node_mul_1678)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.3.self_attn.k_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_1425)",
+        "Mul (node_mul_1282)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "mul_98",
+      "num_elements": 32,
+      "size_bytes": 128,
+      "used_by_operators": [
+        "Mul (node_mul_246)",
+        "Mul (node_mul_103)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.1.self_attn.q_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_470)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.3.input_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_1224)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.4.self_attn.q_norm.weight",
+      "num_elements": 64,
+      "size_bytes": 256,
+      "used_by_operators": [
+        "Mul (node_mul_1658)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "layers.0.post_attention_layernorm.weight",
+      "num_elements": 2048,
+      "size_bytes": 8192,
+      "used_by_operators": [
+        "Mul (node_mul_396)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "val_988",
+      "num_elements": 2304,
+      "size_bytes": 9216,
+      "used_by_operators": [
+        "Gemm (node_MatMul_989/MatMulAddFusion)"
+      ]
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "confidence_head.proj.bias",
+      "num_elements": 1,
+      "size_bytes": 4,
+      "used_by_operators": [
+        "Gemm (node_MatMul_989/MatMulAddFusion)"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "datatype": "QNN_DATATYPE_INT_64",
+      "name": "prev_token_ids",
+      "num_elements": 9,
+      "size_bytes": 72
+    },
+    {
+      "datatype": "QNN_DATATYPE_FLOAT_32",
+      "name": "target_hidden",
+      "num_elements": 122880,
+      "size_bytes": 491520
+    },
+    {
+      "datatype": "QNN_DATATYPE_INT_64",
+      "name": "ctx_positions",
+      "num_elements": 12,
+      "size_bytes": 96
+    },
+    {
+      "datatype": "QNN_DATATYPE_INT_64",
+      "name": "input_ids",
+      "num_elements": 9,
+      "size_bytes": 72
+    },
+    {
+      "datatype": "QNN_DATATYPE_INT_64",
+      "name": "positions",
+      "num_elements": 9,
+      "size_bytes": 72
+    }
+  ],
+  "summary": {
+    "num_initializers": 29,
+    "num_inputs": 5,
+    "total_graph_size_bytes": 604581828,
+    "total_graph_size_mb": 576.574161529541,
+    "total_initializer_size_bytes": 604089996,
+    "total_input_size_bytes": 491832
+  }
+}
